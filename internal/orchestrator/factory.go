@@ -43,7 +43,7 @@ func (f *Factory) CreateOrchestrator(paradigm ParadigmType) (interface{}, error)
 	case ParadigmEvaluation:
 		return f.createEvaluation(), nil
 	case ParadigmFreeChat:
-		return nil, fmt.Errorf("范式 %s 尚未实现", paradigm)
+		return f.createFreeChat(), nil
 	default:
 		return nil, fmt.Errorf("未知的讨论范式: %s", paradigm)
 	}
@@ -72,6 +72,21 @@ func (f *Factory) createCourt() *CourtOrchestrator {
 	summarizeNode := NewSummarizeNode()
 
 	return NewCourtOrchestrator(
+		contextInitNode,
+		expertSpeakNode,
+		moderatorEvalNode,
+		summarizeNode,
+	)
+}
+
+// createFreeChat 创建自由群聊范式编排器
+func (f *Factory) createFreeChat() *FreeChatOrchestrator {
+	contextInitNode := NewContextInitNode(f.roleService, f.skillRegistry, f.gateway)
+	expertSpeakNode := NewExpertSpeakNode()
+	moderatorEvalNode := NewModeratorEvalNode()
+	summarizeNode := NewSummarizeNode()
+
+	return NewFreeChatOrchestrator(
 		contextInitNode,
 		expertSpeakNode,
 		moderatorEvalNode,

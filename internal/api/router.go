@@ -4,6 +4,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/mmcs/internal/agent"
 	"github.com/mmcs/internal/api/middleware"
 	"github.com/mmcs/internal/orchestrator"
 	"github.com/mmcs/internal/role"
@@ -22,6 +23,7 @@ type Dependencies struct {
 	SessionService      *session.Service
 	OrchestratorFactory *orchestrator.Factory
 	HubRegistry         *stream.HubRegistry
+	AgentExecutor       *agent.Executor
 }
 
 // NewRouter 创建并注册所有路由
@@ -35,6 +37,7 @@ func NewRouter(deps *Dependencies) http.Handler {
 	workspaceHandler := NewWorkspaceHandler(deps.WorkspaceService)
 	roleHandler := NewRoleHandler(deps.RoleService)
 	sessionHandler := NewSessionHandler(deps.SessionService, deps.OrchestratorFactory, deps.HubRegistry)
+	agentHandler := NewAgentHandler(deps.AgentExecutor)
 
 	// 健康检查
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +80,12 @@ func NewRouter(deps *Dependencies) http.Handler {
 
 	// ===== SSE 流式推送（无需 JWT，使用 token 参数） =====
 	mux.Handle("GET /api/v1/sessions/{id}/stream", rl.Limit(middleware.PanicRecovery(http.HandlerFunc(sessionHandler.Stream))))
+
+	// ===== Agent（无需 JWT，后续版本添加认证） =====
+	mux.Handle("POST /api/v1/agents", rl.Limit(middleware.PanicRecovery(http.HandlerFunc(agentHandler.Register))))
+	mux.Handle("GET /api/v1/agents", rl.Limit(middleware.PanicRecovery(http.HandlerFunc(agentHandler.ListAgents))))
+	mux.Handle("POST /api/v1/agents/{id}/execute", rl.Limit(middleware.PanicRecovery(http.HandlerFunc(agentHandler.ExecuteSync))))
+	mux.Handle("POST /api/v1/agents/{id}/execute-async", rl.Limit(middleware.PanicRecovery(http.HandlerFunc(agentHandler.ExecuteAsync))))
 
 	return middleware.CORS(middleware.PanicRecovery(mux))
 }

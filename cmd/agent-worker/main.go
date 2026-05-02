@@ -11,6 +11,7 @@ import (
 
 	"github.com/hibiken/asynq"
 	"github.com/mmcs/config"
+	"github.com/mmcs/internal/agent"
 	"github.com/mmcs/pkg/logger"
 	"github.com/mmcs/pkg/postgres"
 	"github.com/mmcs/pkg/redis"
@@ -82,9 +83,12 @@ func main() {
 		Queues:      cfg.Asynq.Queues,
 	})
 
+	// 创建 Agent Executor（无需 Asynq 客户端）
+	executor := agent.NewExecutor(nil)
+
+	// 注册 Agent 类型任务的 Asynq 处理器
 	mux := asynq.NewServeMux()
-	// 注册任务处理器（后续 Phase 3+ 各模块实现后添加）
-	// mux.HandleFunc(agent.TypeAgentTask, agentHandler.HandleAgentTask)
+	mux.HandleFunc(agent.TypeAgentTask, executor.HandleAsynqTask)
 
 	g.Go(func() error {
 		log.Info().

@@ -334,9 +334,24 @@ func TestFactory_UnsupportedParadigm(t *testing.T) {
 
 	factory := NewFactory(svc, skillRegistry, gw)
 
-	_, err := factory.CreateOrchestrator(ParadigmFreeChat)
+	_, err := factory.CreateOrchestrator("unknown_paradigm")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "尚未实现")
+	assert.Contains(t, err.Error(), "未知的讨论范式")
+}
+
+func TestFactory_FreeChatNowSupported(t *testing.T) {
+	svc := newMockRoleService()
+	skillRegistry := role.NewSkillRegistry()
+	gw := newMockGateway()
+
+	factory := NewFactory(svc, skillRegistry, gw)
+
+	orch, err := factory.CreateOrchestrator(ParadigmFreeChat)
+	assert.NoError(t, err)
+	assert.NotNil(t, orch)
+
+	_, ok := orch.(*FreeChatOrchestrator)
+	assert.True(t, ok, "期望得到 FreeChatOrchestrator")
 }
 
 func TestSkillRegistry_DefaultSkills(t *testing.T) {
