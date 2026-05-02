@@ -1,0 +1,113 @@
+# golangci-lint 配置文件
+# 参考: https://golangci-lint.run/usage/configuration/
+
+run:
+  timeout: 5m
+  tests: true
+  # 排除 vendor 和生成文件
+  skip-dirs:
+    - vendor/
+    - .github/
+  skip-files:
+    - ".*\\.pb\\.go$"
+    - ".*\\.gen\\.go$"
+
+output:
+  formats:
+    - format: colored-line-number
+      path: stdout
+  print-issued-lines: true
+  print-linter-name: true
+
+linters:
+  enable-all: false
+  disable-all: true
+  enable:
+    # 基础
+    - gofmt
+    - goimports
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gosimple
+    - typecheck
+
+    # 错误处理
+    - errcheck
+    - errorlint
+
+    # 风格
+    - misspell
+    - revive
+    - whitespace
+
+    # 安全
+    - gosec
+
+    # 性能
+    - prealloc
+
+    # 其他
+    - bodyclose
+    - noctx
+    - unconvert
+
+linters-settings:
+  gofmt:
+    simplify: true
+
+  goimports:
+    local-prefixes: github.com/mmcs
+
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+      - name: blank-imports
+        severity: warning
+      - name: context-keys-type
+        severity: warning
+      - name: time-naming
+        severity: warning
+      - name: var-declaration
+        severity: warning
+      - name: unexported-return
+        severity: warning
+
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    # 排除常用关闭方法
+    exclude-functions:
+      - (*os.File).Close
+      - (io.Closer).Close
+      - (io.ReadCloser).Close
+
+  gosec:
+    excludes:
+      - G404 # 允许使用 math/rand（非安全场景）
+      - G115 # 允许整数转换
+
+  staticcheck:
+    checks:
+      - "all"
+      - "-SA1019" # 允许使用已弃用方法（临时过渡）
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  exclude-rules:
+    # 测试文件放宽规则
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - noctx
+
+    # 入口文件允许空白导入
+    - path: cmd/
+      linters:
+        - errcheck
+        - gosec

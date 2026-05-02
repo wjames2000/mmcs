@@ -1,0 +1,64 @@
+# MMCS 多模型协作系统 - 配置文件
+# 使用 ${ENV_VAR} 语法引用环境变量
+
+server:
+  http_port: 8080
+  grpc_port: 9090
+
+database:
+  dsn: "postgres://mmcs:mmcs@localhost:5432/mmcs?sslmode=disable"
+  max_open: 50
+  max_idle: 10
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+  pool_size: 100
+
+asynq:
+  concurrency: 10
+  queues:
+    critical: 6
+    default: 3
+    low: 1
+
+model_gateway:
+  providers:
+    openai:
+      enabled: true
+      base_url: "https://api.deepseek.com"
+      api_key: "${OPENAI_API_KEY}"
+      default_model: "deepseek-v4-flash"
+    vllm:
+      enabled: true
+      base_url: "https://chat.zxhkuav.cn"
+      default_model: "gemma-4-26B-A4B-it"
+  timeout: 60
+
+session:
+  max_rounds: 10
+  round_timeout: 300
+  graph_pool_size: 100
+
+context:
+  max_tokens: 128000
+  strategy: "truncate_summarize"
+
+auth:
+  jwt_secret: "${JWT_SECRET}"
+  jwt_expiry: "15m"
+
+crypto:
+  master_key: "${CRYPTO_MASTER_KEY}"
+
+log:
+  level: "info"
+  format: "json"               # json 或 text
+  output: "stdout"             # stdout / stderr / file
+  file: "logs/mmcs.log"        # output=file 时的路径，支持 ${ENV_VAR}
+  rotation:
+    max_size: 100              # 单个日志文件最大 MB，超限自动切分
+    max_age: 30                # 日志文件最长保留天数
+    max_backups: 0             # 最多保留的旧日志文件数，0=不限制
+    compress: true             # 是否自动压缩归档日志
