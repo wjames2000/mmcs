@@ -6,9 +6,20 @@ import (
 	"sync"
 )
 
+// SSE 事件类型常量
+const (
+	EventTypeConnected   = "connected"
+	EventTypeMessage     = "message"
+	EventTypeStatus      = "status"
+	EventTypeError       = "error"
+	EventTypeDone        = "done"
+	EventTypeTaskCreated = "task.created"
+	EventTypeTaskUpdated = "task.updated"
+)
+
 // Event SSE 事件
 type Event struct {
-	Type string      `json:"type"` // event type: connected / message / status / error / done
+	Type string      `json:"type"`
 	Data interface{} `json:"data"`
 }
 

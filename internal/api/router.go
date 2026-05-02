@@ -10,6 +10,7 @@ import (
 	"github.com/mmcs/internal/role"
 	"github.com/mmcs/internal/session"
 	"github.com/mmcs/internal/stream"
+	"github.com/mmcs/internal/task"
 	"github.com/mmcs/internal/user"
 	"github.com/mmcs/internal/workspace"
 )
@@ -24,6 +25,8 @@ type Dependencies struct {
 	OrchestratorFactory *orchestrator.Factory
 	HubRegistry         *stream.HubRegistry
 	AgentExecutor       *agent.Executor
+	TaskService         *task.Service
+	TaskStore           task.Store
 }
 
 // NewRouter 创建并注册所有路由
@@ -34,10 +37,11 @@ func NewRouter(deps *Dependencies) http.Handler {
 
 	// Auth handlers
 	authHandler := NewAuthHandler(deps.UserService)
-	workspaceHandler := NewWorkspaceHandler(deps.WorkspaceService)
+	workspaceHandler := NewWorkspaceHandler(deps.WorkspaceService, deps.TaskService)
 	roleHandler := NewRoleHandler(deps.RoleService)
 	sessionHandler := NewSessionHandler(deps.SessionService, deps.OrchestratorFactory, deps.HubRegistry)
 	agentHandler := NewAgentHandler(deps.AgentExecutor)
+	taskHandler := NewTaskHandler(deps.TaskService, deps.SessionService)
 
 	// 健康检查
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +90,16 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.Handle("GET /api/v1/agents", rl.Limit(middleware.PanicRecovery(http.HandlerFunc(agentHandler.ListAgents))))
 	mux.Handle("POST /api/v1/agents/{id}/execute", rl.Limit(middleware.PanicRecovery(http.HandlerFunc(agentHandler.ExecuteSync))))
 	mux.Handle("POST /api/v1/agents/{id}/execute-async", rl.Limit(middleware.PanicRecovery(http.HandlerFunc(agentHandler.ExecuteAsync))))
+
+	// ===== 任务（需 JWT） =====
+	taskAuth := deps.AuthMiddleware.Authenticate
+	mux.Handle("GET /api/v1/tasks", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(taskHandler.ListTasks)))))
+	mux.Handle("POST /api/v1/tasks", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(taskHandler.CreateTask)))))
+	mux.Handle("GET /api/v1/tasks/{id}", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(taskHandler.GetTask)))))
+	mux.Handle("PATCH /api/v1/tasks/{id}", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(taskHandler.UpdateTask)))))
+	mux.Handle("POST /api/v1/tasks/{id}/assign", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(taskHandler.AssignTask)))))
+	mux.Handle("POST /api/v1/tasks/{id}/extract", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(taskHandler.ExtractTasks)))))
+	mux.Handle("POST /api/v1/tasks/{id}/auto-assign", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(taskHandler.AutoAssignTask)))))
 
 	return middleware.CORS(middleware.PanicRecovery(mux))
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/mmcs/internal/api/middleware"
+	"github.com/mmcs/internal/task"
 	"github.com/mmcs/internal/user"
 	"github.com/mmcs/internal/workspace"
 )
@@ -12,11 +13,12 @@ import (
 // WorkspaceHandler 工作区相关 HTTP handler
 type WorkspaceHandler struct {
 	workspaceService *workspace.Service
+	taskService      *task.Service
 }
 
 // NewWorkspaceHandler 创建工作区 handler
-func NewWorkspaceHandler(workspaceService *workspace.Service) *WorkspaceHandler {
-	return &WorkspaceHandler{workspaceService: workspaceService}
+func NewWorkspaceHandler(workspaceService *workspace.Service, taskService *task.Service) *WorkspaceHandler {
+	return &WorkspaceHandler{workspaceService: workspaceService, taskService: taskService}
 }
 
 // List 获取工作区列表
@@ -82,7 +84,29 @@ func (h *WorkspaceHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	middleware.WriteSuccess(w, wsp)
+	// 获取工作区下任务的聚合统计
+	taskAgg := map[string]int{
+		"total":       0,
+		"pending":     0,
+		"in_progress": 0,
+		"reviewing":   0,
+		"completed":   0,
+		"rejected":    0,
+	}
+	if h.taskService != nil {
+		tasks, err := h.taskService.ListByWorkspace(r.Context(), id)
+		if err == nil {
+			taskAgg["total"] = len(tasks)
+			for _, t := range tasks {
+				taskAgg[string(t.Status)]++
+			}
+		}
+	}
+
+	middleware.WriteSuccess(w, map[string]interface{}{
+		"workspace":    wsp,
+		"task_summary": taskAgg,
+	})
 }
 
 // Update 更新工作区
