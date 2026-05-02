@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmcs/internal/minutes"
+	"github.com/wjames2000/mmcs/internal/minutes"
 )
 
 // ExtractFromMinutes 从 MeetingMinutes 中提取任务列表

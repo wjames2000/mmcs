@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mmcs/internal/model_gateway"
+	"github.com/wjames2000/mmcs/internal/model_gateway"
 )
 
 // ChatModelAgent 封装 ChatModel 实现 Agent 接口

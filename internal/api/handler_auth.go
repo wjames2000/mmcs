@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/mmcs/internal/api/middleware"
-	"github.com/mmcs/internal/user"
+	"github.com/wjames2000/mmcs/internal/api/middleware"
+	"github.com/wjames2000/mmcs/internal/user"
 )
 
 // AuthHandler 认证相关 HTTP handler

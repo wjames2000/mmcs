@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mmcs/internal/minutes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/wjames2000/mmcs/internal/minutes"
 )
 
 func newTestService() *Service {

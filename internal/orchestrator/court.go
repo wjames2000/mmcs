@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mmcs/internal/model_gateway"
-	"github.com/mmcs/internal/stream"
 	"github.com/rs/zerolog/log"
+	"github.com/wjames2000/mmcs/internal/model_gateway"
+	"github.com/wjames2000/mmcs/internal/stream"
 )
 
 // CourtConfig 法庭范式配置

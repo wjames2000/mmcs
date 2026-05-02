@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmcs/internal/model_gateway"
-	"github.com/mmcs/internal/stream"
 	"github.com/rs/zerolog/log"
+	"github.com/wjames2000/mmcs/internal/model_gateway"
+	"github.com/wjames2000/mmcs/internal/stream"
 )
 
 // EvaluationOption 待评估的选项

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmcs/config"
-	"github.com/mmcs/internal/model_gateway"
+	"github.com/wjames2000/mmcs/config"
+	"github.com/wjames2000/mmcs/internal/model_gateway"
 )
 
 // OllamaProvider Ollama 本地模型提供商

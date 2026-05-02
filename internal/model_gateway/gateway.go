@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/mmcs/config"
+	"github.com/wjames2000/mmcs/config"
 )
 
 // ChatMessage 聊天消息

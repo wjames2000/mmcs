@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/mmcs/internal/api/middleware"
-	"github.com/mmcs/internal/orchestrator"
-	"github.com/mmcs/internal/session"
-	"github.com/mmcs/internal/stream"
-	"github.com/mmcs/internal/user"
 	"github.com/rs/zerolog/log"
+	"github.com/wjames2000/mmcs/internal/api/middleware"
+	"github.com/wjames2000/mmcs/internal/orchestrator"
+	"github.com/wjames2000/mmcs/internal/session"
+	"github.com/wjames2000/mmcs/internal/stream"
+	"github.com/wjames2000/mmcs/internal/user"
 )
 
 // SessionHandler 会话相关 HTTP handler

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mmcs/internal/stream"
 	"github.com/rs/zerolog/log"
+	"github.com/wjames2000/mmcs/internal/stream"
 )
 
 // RoundRobinConfig 轮询发言范式配置

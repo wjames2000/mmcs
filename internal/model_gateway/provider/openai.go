@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmcs/config"
-	"github.com/mmcs/internal/model_gateway"
+	"github.com/wjames2000/mmcs/config"
+	"github.com/wjames2000/mmcs/internal/model_gateway"
 )
 
 // OpenAIProvider OpenAI-compatible API 提供商

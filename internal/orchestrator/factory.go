@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"fmt"
 
-	"github.com/mmcs/internal/role"
+	"github.com/wjames2000/mmcs/internal/role"
 )
 
 // ParadigmType 讨论范式类型

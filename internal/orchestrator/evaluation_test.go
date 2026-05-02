@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/mmcs/internal/role"
-	"github.com/mmcs/internal/stream"
-	"github.com/mmcs/pkg/util"
 	"github.com/stretchr/testify/assert"
+	"github.com/wjames2000/mmcs/internal/role"
+	"github.com/wjames2000/mmcs/internal/stream"
+	"github.com/wjames2000/mmcs/pkg/util"
 )
 
 func TestNewEvaluationOrchestrator(t *testing.T) {

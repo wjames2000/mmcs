@@ -1227,7 +1227,7 @@ X-RateLimit-Reset: 1683032400
 ```protobuf
 syntax = "proto3";
 package mmcs.v1;
-option go_package = "github.com/mmcs/api/v1";
+option go_package = "github.com/wjames2000/mmcs/api/v1";
 
 service SessionService {
     rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);

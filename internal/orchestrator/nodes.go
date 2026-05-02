@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mmcs/internal/model_gateway"
-	"github.com/mmcs/internal/role"
-	"github.com/mmcs/internal/stream"
 	"github.com/rs/zerolog/log"
+	"github.com/wjames2000/mmcs/internal/model_gateway"
+	"github.com/wjames2000/mmcs/internal/role"
+	"github.com/wjames2000/mmcs/internal/stream"
 )
 
 // RoleContext 角色运行时上下文

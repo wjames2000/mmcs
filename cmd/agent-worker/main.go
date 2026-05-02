@@ -10,12 +10,12 @@ import (
 	"syscall"
 
 	"github.com/hibiken/asynq"
-	"github.com/mmcs/config"
-	"github.com/mmcs/internal/agent"
-	"github.com/mmcs/pkg/logger"
-	"github.com/mmcs/pkg/postgres"
-	"github.com/mmcs/pkg/redis"
 	"github.com/rs/zerolog/log"
+	"github.com/wjames2000/mmcs/config"
+	"github.com/wjames2000/mmcs/internal/agent"
+	"github.com/wjames2000/mmcs/pkg/logger"
+	"github.com/wjames2000/mmcs/pkg/postgres"
+	"github.com/wjames2000/mmcs/pkg/redis"
 	"golang.org/x/sync/errgroup"
 )
 
