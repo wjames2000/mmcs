@@ -39,9 +39,9 @@ func (f *Factory) CreateOrchestrator(paradigm ParadigmType) (interface{}, error)
 	case ParadigmRoundRobin:
 		return f.createRoundRobin(), nil
 	case ParadigmCourt:
-		return nil, fmt.Errorf("范式 %s 尚未实现", paradigm)
+		return f.createCourt(), nil
 	case ParadigmEvaluation:
-		return nil, fmt.Errorf("范式 %s 尚未实现", paradigm)
+		return f.createEvaluation(), nil
 	case ParadigmFreeChat:
 		return nil, fmt.Errorf("范式 %s 尚未实现", paradigm)
 	default:
@@ -57,6 +57,36 @@ func (f *Factory) createRoundRobin() *RoundRobinOrchestrator {
 	summarizeNode := NewSummarizeNode()
 
 	return NewRoundRobinOrchestrator(
+		contextInitNode,
+		expertSpeakNode,
+		moderatorEvalNode,
+		summarizeNode,
+	)
+}
+
+// createCourt 创建法庭范式编排器
+func (f *Factory) createCourt() *CourtOrchestrator {
+	contextInitNode := NewContextInitNode(f.roleService, f.skillRegistry, f.gateway)
+	expertSpeakNode := NewExpertSpeakNode()
+	moderatorEvalNode := NewModeratorEvalNode()
+	summarizeNode := NewSummarizeNode()
+
+	return NewCourtOrchestrator(
+		contextInitNode,
+		expertSpeakNode,
+		moderatorEvalNode,
+		summarizeNode,
+	)
+}
+
+// createEvaluation 创建加权评估范式编排器
+func (f *Factory) createEvaluation() *EvaluationOrchestrator {
+	contextInitNode := NewContextInitNode(f.roleService, f.skillRegistry, f.gateway)
+	expertSpeakNode := NewExpertSpeakNode()
+	moderatorEvalNode := NewModeratorEvalNode()
+	summarizeNode := NewSummarizeNode()
+
+	return NewEvaluationOrchestrator(
 		contextInitNode,
 		expertSpeakNode,
 		moderatorEvalNode,

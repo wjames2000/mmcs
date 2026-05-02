@@ -334,7 +334,7 @@ func TestFactory_UnsupportedParadigm(t *testing.T) {
 
 	factory := NewFactory(svc, skillRegistry, gw)
 
-	_, err := factory.CreateOrchestrator(ParadigmCourt)
+	_, err := factory.CreateOrchestrator(ParadigmFreeChat)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "尚未实现")
 }
