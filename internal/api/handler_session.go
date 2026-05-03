@@ -14,16 +14,30 @@ import (
 	"github.com/wjames2000/mmcs/internal/user"
 )
 
+// SessionService 会话服务接口（抽象 session.Service，便于测试 mock）
+type SessionService interface {
+	Create(ctx context.Context, creatorID string, req *session.CreateRequest) (*session.CreateResponse, error)
+	Get(ctx context.Context, id string) (*session.Session, error)
+	GetWithRoles(ctx context.Context, id string) (*session.Session, []*session.SessionRole, error)
+	ListByWorkspace(ctx context.Context, workspaceID string) ([]*session.Session, error)
+	Start(ctx context.Context, id string) error
+	Pause(ctx context.Context, id string, nodeName string, message string) error
+	Resume(ctx context.Context, id string, message string) error
+	Terminate(ctx context.Context, id string) error
+	InitChannels(sessionID string) *session.SessionChannels
+	RemoveChannels(sessionID string)
+}
+
 // SessionHandler 会话相关 HTTP handler
 type SessionHandler struct {
-	sessionService      *session.Service
+	sessionService      SessionService
 	orchestratorFactory *orchestrator.Factory
 	hubRegistry         *stream.HubRegistry
 }
 
 // NewSessionHandler 创建会话 handler
 func NewSessionHandler(
-	sessionService *session.Service,
+	sessionService SessionService,
 	orchestratorFactory *orchestrator.Factory,
 	hubRegistry *stream.HubRegistry,
 ) *SessionHandler {

@@ -39,9 +39,13 @@ func (r *ulidLockedMonotonicReader) Read(p []byte) (int, error) {
 // NewID 生成带业务前缀的 ULID
 // 格式：{prefix}_{26字符ULID}
 // 示例：NewID("u") → "u_01JQZ5ZJY8X7K2W6V9N3M4P5QR"
+// 空前缀返回纯 ULID（26 字符）
 func NewID(prefix string) string {
 	entropy := ulid.Monotonic(rand.Reader, 0)
 	id := ulid.MustNew(ulid.Timestamp(time.Now()), entropy)
+	if prefix == "" {
+		return id.String()
+	}
 	return fmt.Sprintf("%s_%s", prefix, id.String())
 }
 

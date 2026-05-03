@@ -37,6 +37,7 @@ type Hub struct {
 	sessionID   string
 	subscribers map[string]*Subscriber
 	doneCh      chan struct{}
+	closed      bool // 标记是否已关闭，用于 Close 幂等
 }
 
 // NewHub 创建一个 SSE Hub
@@ -106,9 +107,15 @@ func (h *Hub) SubscriberCount() int {
 }
 
 // Close 关闭 Hub，清理所有订阅者
+// 幂等实现：多次调用不会 panic
 func (h *Hub) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	if h.closed {
+		return
+	}
+	h.closed = true
 
 	for _, sub := range h.subscribers {
 		close(sub.CloseCh)

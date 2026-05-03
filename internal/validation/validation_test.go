@@ -734,7 +734,7 @@ func TestPrepareRetry_RejectedVerdict(t *testing.T) {
 func TestIsRetryable(t *testing.T) {
 	assert.True(t, task.IsRetryable(newTestTask("t1", "s", "t", "d", "c", "a", task.StatusInProgress)))
 	assert.True(t, task.IsRetryable(newTestTask("t2", "s", "t", "d", "c", "a", task.StatusReviewing)))
-	assert.True(t, task.IsRetryable(newTestTask("t3", "s", "t", "d", "c", "a", task.StatusRejected)))
+	assert.False(t, task.IsRetryable(newTestTask("t3", "s", "t", "d", "c", "a", task.StatusRejected)))
 	assert.False(t, task.IsRetryable(newTestTask("t4", "s", "t", "d", "c", "a", task.StatusCompleted)))
 	assert.False(t, task.IsRetryable(nil))
 }

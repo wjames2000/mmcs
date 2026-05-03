@@ -81,7 +81,7 @@ func BenchmarkHub_RegisterUnregister(b *testing.B) {
 				defer wg.Done()
 				sub := &Subscriber{
 					ID:      fmt.Sprintf("sub_bench_%d_%d", i, idx),
-					Events:  make(chan *Event, 16),
+					Events:  make(chan *Event, 1024),
 					CloseCh: make(chan struct{}),
 				}
 				subs[idx] = sub

@@ -32,10 +32,10 @@ func PrepareRetry(task *Task, result *ValidationResult) (string, error) {
 }
 
 // IsRetryable 判断任务是否可以退回重试
-// 只有非终止状态的任务可以退回
+// 只有 in_progress 和 reviewing 状态的任务可以退回重试
 func IsRetryable(task *Task) bool {
 	if task == nil {
 		return false
 	}
-	return !TerminalStatus(task.Status)
+	return task.Status == StatusInProgress || task.Status == StatusReviewing
 }

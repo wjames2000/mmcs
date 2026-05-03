@@ -1,0 +1,19 @@
+{
+  "name": "mmcs",
+  "outputfilename": "mmcs",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "http://localhost:5173",
+  "author": {
+    "name": "MMCS Team",
+    "email": "dev@mmcs.local"
+  },
+  "info": {
+    "companyName": "MMCS",
+    "productName": "MMCS 多模型协作系统",
+    "productVersion": "1.0.0",
+    "copyright": "Copyright 2026 MMCS",
+    "comments": "多模型协作系统桌面客户端"
+  }
+}

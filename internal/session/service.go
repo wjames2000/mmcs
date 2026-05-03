@@ -13,11 +13,28 @@ import (
 	"github.com/wjames2000/mmcs/pkg/util"
 )
 
+// Storage 会话存储接口（抽象 Repository，便于测试 mock）
+type Storage interface {
+	Create(ctx context.Context, s *Session) error
+	GetByID(ctx context.Context, id string) (*Session, error)
+	UpdateStatus(ctx context.Context, id, status string, extra ...time.Time) error
+	Update(ctx context.Context, s *Session) error
+	ListByWorkspace(ctx context.Context, workspaceID string) ([]*Session, error)
+	AddSessionRole(ctx context.Context, sr *SessionRole) error
+	GetSessionRoles(ctx context.Context, sessionID string) ([]*SessionRole, error)
+	RemoveSessionRole(ctx context.Context, sessionID, roleID string) error
+}
+
+// RoleProvider 角色提供者接口（抽象 role.Service）
+type RoleProvider interface {
+	Get(ctx context.Context, id string) (*role.Role, error)
+}
+
 // Service 会话服务
 type Service struct {
-	repo      *Repository
+	repo      Storage
 	graphPool *GraphPool
-	roleSvc   *role.Service
+	roleSvc   RoleProvider
 
 	mu           sync.RWMutex
 	runtimeChans map[string]*SessionChannels // sessionID → runtime channels
@@ -30,7 +47,7 @@ func (s *Service) SetHubRegistry(hr *stream.HubRegistry) {
 }
 
 // NewService 创建会话服务
-func NewService(repo *Repository, graphPool *GraphPool, roleSvc *role.Service) *Service {
+func NewService(repo Storage, graphPool *GraphPool, roleSvc RoleProvider) *Service {
 	return &Service{
 		repo:         repo,
 		graphPool:    graphPool,
@@ -171,11 +188,16 @@ func (s *Service) Start(ctx context.Context, id string) error {
 }
 
 // InitChannels 初始化会话运行时 channel
+// 如果已存在则返回现有实例
 func (s *Service) InitChannels(sessionID string) *SessionChannels {
-	ch := NewSessionChannels()
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if ch, ok := s.runtimeChans[sessionID]; ok {
+		return ch
+	}
+	ch := NewSessionChannels()
 	s.runtimeChans[sessionID] = ch
-	s.mu.Unlock()
 	return ch
 }
 

@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MMCS 管理界面 - 视觉原型</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', -apple-system, sans-serif; background: #f8fafc; color: #111827; }
+
+  /* ===== 导航 Tabs ===== */
+  .nav-tabs { display: flex; gap: 2px; background: #1e293b; padding: 8px 16px 0; position: sticky; top: 0; z-index: 100; }
+  .nav-tab { padding: 10px 20px; color: #94a3b8; cursor: pointer; border: none; background: transparent; font-size: 13px; border-radius: 8px 8px 0 0; }
+  .nav-tab.active { background: #f8fafc; color: #1e293b; font-weight: 600; }
+  .nav-tab:hover:not(.active) { color: #e2e8f0; }
+
+  /* ===== 布局 ===== */
+  .page { display: none; max-width: 1200px; margin: 0 auto; padding: 24px; }
+  .page.active { display: block; }
+
+  /* ===== 头部 ===== */
+  .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  .page-header h1 { font-size: 24px; font-weight: 600; }
+  .page-header .actions { display: flex; gap: 8px; }
+
+  /* ===== 按钮 ===== */
+  .btn { padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; border: none; transition: all .15s; }
+  .btn-primary { background: #2563eb; color: #fff; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-outline { background: #fff; color: #374151; border: 1px solid #d1d5db; }
+  .btn-outline:hover { background: #f3f4f6; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-success { background: #16a34a; color: #fff; }
+  .btn-warning { background: #ca8a04; color: #fff; }
+  .btn-danger { background: #dc2626; color: #fff; }
+
+  /* ===== Badge ===== */
+  .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; gap: 4px; }
+  .badge-draft { background: #f3f4f6; color: #6b7280; }
+  .badge-running { background: #dcfce7; color: #16a34a; }
+  .badge-paused { background: #fef9c3; color: #ca8a04; }
+  .badge-ended { background: #dbeafe; color: #2563eb; }
+  .badge-critical { background: #fef2f2; color: #dc2626; }
+  .badge-high { background: #fff7ed; color: #ea580c; }
+  .badge-medium { background: #f0f9ff; color: #2563eb; }
+  .badge-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+  /* ===== 统计卡片行 ===== */
+  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .stat-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; }
+  .stat-card .num { font-size: 28px; font-weight: 700; }
+  .stat-card .label { font-size: 13px; color: #6b7280; margin-top: 2px; }
+
+  /* ===== 网格卡片 ===== */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; transition: box-shadow .15s; cursor: pointer; }
+  .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08); }
+  .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .card-title { font-size: 16px; font-weight: 600; }
+  .card-desc { font-size: 13px; color: #6b7280; margin-bottom: 12px; line-height: 1.5; }
+  .card-meta { display: flex; gap: 16px; font-size: 12px; color: #9ca3af; }
+  .card-meta span { display: flex; align-items: center; gap: 4px; }
+
+  /* ===== 列表 ===== */
+  .list { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
+  .list-item { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid #f3f4f6; }
+  .list-item:last-child { border-bottom: none; }
+  .list-item:hover { background: #f9fafb; }
+  .list-item .left { display: flex; align-items: center; gap: 12px; flex: 1; }
+  .list-item .left .icon { font-size: 18px; }
+  .list-item .title { font-weight: 500; font-size: 14px; }
+  .list-item .sub { font-size: 12px; color: #9ca3af; margin-top: 2px; }
+  .list-item .right { display: flex; align-items: center; gap: 8px; }
+
+  /* ===== 聊天 ===== */
+  .chat-layout { display: flex; gap: 20px; }
+  .chat-sidebar { width: 200px; flex-shrink: 0; }
+  .chat-sidebar .participant { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 4px; }
+  .chat-sidebar .participant.active { background: #eff6ff; }
+  .chat-main { flex: 1; }
+  .msg { margin-bottom: 16px; display: flex; }
+  .msg-ai { justify-content: flex-start; }
+  .msg-user { justify-content: flex-end; }
+  .msg-bubble { max-width: 75%; padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.6; position: relative; }
+  .msg-ai .msg-bubble { background: #fff; border: 1px solid #e5e7eb; border-left: 4px solid #dc2626; }
+  .msg-user .msg-bubble { background: #2563eb; color: #fff; }
+  .msg-meta { font-size: 11px; color: #9ca3af; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .msg-user .msg-meta { justify-content: flex-end; color: rgba(255,255,255,.7); }
+  .typing-cursor::after { content: '▊'; animation: blink 1s step-end infinite; margin-left: 2px; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ===== 看板 ===== */
+  .board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .board-col { background: #f3f4f6; border-radius: 8px; padding: 12px; min-height: 300px; }
+  .board-col-header { font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #d1d5db; display: flex; justify-content: space-between; }
+  .board-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; margin-bottom: 8px; cursor: grab; }
+  .board-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  .board-card-title { font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+  .board-card-meta { display: flex; gap: 4px; flex-wrap: wrap; }
+
+  /* ===== 模态 ===== */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 1000; justify-content: center; align-items: center; }
+  .modal-overlay.active { display: flex; }
+  .modal { background: #fff; border-radius: 12px; width: 520px; max-height: 80vh; overflow-y: auto; padding: 24px; }
+  .modal h2 { font-size: 18px; margin-bottom: 20px; }
+  .form-group { margin-bottom: 16px; }
+  .form-group label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; color: #374151; }
+  .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+  .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+  .form-group textarea { min-height: 80px; resize: vertical; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+  /* ===== 会议纪要 ===== */
+  .minutes-section { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+  .minutes-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: #374151; }
+  .decision-item { padding: 12px; border-left: 3px solid #2563eb; margin-bottom: 8px; background: #f8fafc; border-radius: 0 6px 6px 0; }
+  .decision-item .topic { font-weight: 500; font-size: 14px; }
+  .decision-item .conclusion { font-size: 13px; color: #6b7280; margin-top: 4px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #f3f4f6; }
+  th { font-weight: 600; color: #6b7280; font-size: 12px; text-transform: uppercase; background: #f9fafb; }
+
+  /* ===== 加载 ===== */
+  .skeleton { background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 6px; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+</style>
+</head>
+<body>
+
+<!-- ===== 导航 ===== -->
+<div class="nav-tabs">
+  <div class="nav-tab active" onclick="switchPage('workspaces')">📋 工作区</div>
+  <div class="nav-tab" onclick="switchPage('roles')">👤 角色管理</div>
+  <div class="nav-tab" onclick="switchPage('models')">⚙️ 模型配置</div>
+  <div style="flex:1"></div>
+  <div class="nav-tab" onclick="switchPage('login')">🔑 登录</div>
+</div>
+
+<!-- ===== 工作区列表 ===== -->
+<div id="page-workspaces" class="page active">
+  <div class="page-header">
+    <h1>工作区</h1>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="toggleModal('workspace-modal')">+ 新建工作区</button>
+    </div>
+  </div>
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📁 Q2 产品需求评审</span>
+        <span class="badge badge-running"><span class="badge-dot" style="background:#16a34a"></span> 活跃</span>
+      </div>
+      <div class="card-desc">2026 Q2 所有产品需求的讨论和评审工作区</div>
+      <div class="card-meta">
+        <span>📄 5 会话</span>
+        <span>📋 10 任务</span>
+        <span>共享模式</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📁 代码评审工作区</span>
+        <span class="badge badge-running"><span class="badge-dot" style="background:#16a34a"></span> 活跃</span>
+      </div>
+      <div class="card-desc">关键 PR 合并前的系统化代码审查</div>
+      <div class="card-meta">
+        <span>📄 3 会话</span>
+        <span>📋 5 任务</span>
+        <span>独立模式</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📁 技术选型讨论</span>
+        <span class="badge badge-ended"><span class="badge-dot" style="background:#2563eb"></span> 已归档</span>
+      </div>
+      <div class="card-desc">框架选型和架构决策的多轮讨论</div>
+      <div class="card-meta">
+        <span>📄 8 会话</span>
+        <span>📋 15 任务</span>
+        <span>共享模式</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 工作区详情 ===== -->
+<div id="page-workspace-detail" class="page">
+  <div class="page-header">
+    <div>
+      <span style="font-size:13px;color:#6b7280">← 工作区</span>
+      <h1 style="margin-top:4px">Q2 产品需求评审</h1>
+    </div>
+    <div class="actions">
+      <button class="btn btn-outline">编辑</button>
+      <button class="btn btn-outline">归档</button>
+    </div>
+  </div>
+  <div class="stats-row">
+    <div class="stat-card"><div class="num">5</div><div class="label">会话</div></div>
+    <div class="stat-card"><div class="num">3</div><div class="label">待办</div></div>
+    <div class="stat-card"><div class="num">2</div><div class="label">进行中</div></div>
+    <div class="stat-card"><div class="num">8</div><div class="label">已完成</div></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <h3 style="font-size:15px;font-weight:600">会话列表</h3>
+    <button class="btn btn-primary btn-sm">+ 新建会话</button>
+  </div>
+  <div class="list">
+    <div class="list-item" onclick="switchPage('session')" style="cursor:pointer">
+      <div class="left">
+        <span>●</span>
+        <div>
+          <div class="title">用户登录模块代码评审</div>
+          <div class="sub">模拟法庭 · 2026-05-02 10:00 → 10:15</div>
+        </div>
+      </div>
+      <div class="right">
+        <span class="badge badge-ended">已结束</span>
+        <span style="color:#2563eb;font-size:12px">查看纪要 →</span>
+      </div>
+    </div>
+    <div class="list-item" onclick="switchPage('session')" style="cursor:pointer">
+      <div class="left">
+        <span>●</span>
+        <div>
+          <div class="title">技术选型：自研 vs 采购</div>
+          <div class="sub">加权评估 · 2026-05-02 09:00 · 进行中...</div>
+        </div>
+      </div>
+      <div class="right">
+        <span class="badge badge-running">运行中</span>
+        <button class="btn btn-primary btn-sm">进入</button>
+      </div>
+    </div>
+    <div class="list-item">
+      <div class="left">
+        <span>●</span>
+        <div>
+          <div class="title">缓存策略头脑风暴</div>
+          <div class="sub">轮询发言 · 2026-05-01 14:00</div>
+        </div>
+      </div>
+      <div class="right">
+        <span class="badge badge-draft">草稿</span>
+        <button class="btn btn-outline btn-sm">启动</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 会话详情 ===== -->
+<div id="page-session" class="page">
+  <div class="page-header">
+    <div>
+      <span style="font-size:13px;color:#6b7280">← Q2 产品需求评审</span>
+      <h1 style="margin-top:4px">用户登录模块代码评审</h1>
+    </div>
+    <div class="actions">
+      <span class="badge badge-running" style="font-size:13px;padding:4px 12px"><span class="badge-dot" style="background:#16a34a"></span> 运行中</span>
+      <button class="btn btn-warning btn-sm">⏸ 暂停</button>
+      <button class="btn btn-danger btn-sm">⏹ 终止</button>
+      <button class="btn btn-outline btn-sm">📄 纪要</button>
+    </div>
+  </div>
+  <div class="chat-layout">
+    <div class="chat-sidebar">
+      <div style="font-size:12px;font-weight:600;color:#6b7280;margin-bottom:8px">参与者</div>
+      <div class="participant active"><span style="color:#dc2626">●</span> 安全审查员<br><span style="font-size:11px;color:#9ca3af">claude-3.5-sonnet</span></div>
+      <div class="participant"><span style="color:#16a34a">●</span> 性能分析员<br><span style="font-size:11px;color:#9ca3af">gpt-4o</span></div>
+      <div class="participant"><span style="color:#ca8a04">●</span> 可维护性评估员<br><span style="font-size:11px;color:#9ca3af">deepseek-coder</span></div>
+    </div>
+    <div class="chat-main">
+      <div style="font-size:12px;text-align:center;color:#6b7280;margin-bottom:12px;padding:8px;background:#f3f4f6;border-radius:6px">📍 第 1 轮 · 交叉质询阶段</div>
+      <div class="msg msg-ai">
+        <div class="msg-bubble" style="border-left-color:#dc2626">
+          <div class="msg-meta"><span style="color:#dc2626;font-weight:600">🔴 安全审查员</span> · 10:02:03</div>
+          从安全角度来看，该模块存在 <strong>SQL 注入风险</strong>。虽然使用了参数化查询，但输入长度校验缺失，建议在网关层统一添加。
+        </div>
+      </div>
+      <div class="msg msg-ai">
+        <div class="msg-bubble" style="border-left-color:#16a34a">
+          <div class="msg-meta"><span style="color:#16a34a;font-weight:600">🟢 性能分析员</span> · 10:02:05</div>
+          用户列表页查询响应时间达 5.2s，需要优化索引。建议对 email 字段添加覆盖索引，预计可降至 300ms 以下。
+        </div>
+      </div>
+      <div class="msg msg-ai">
+        <div class="msg-bubble" style="border-left-color:#ca8a04">
+          <div class="msg-meta"><span style="color:#ca8a04;font-weight:600">🟡 可维护性评估员</span> · 10:02:08</div>
+          代码缺少业务注释，新成员理解成本较高。建议为每个 service 方法添加中文说明文档。
+        </div>
+      </div>
+      <div class="msg msg-ai">
+        <div class="msg-bubble" style="border-left-color:#dc2626">
+          <div class="msg-meta"><span style="color:#dc2626;font-weight:600">🔴 安全审查员</span> · 正在输入... <span class="typing-cursor"></span></div>
+          此外，还需要关注 OAuth 集成部分<br><br>...
+        </div>
+      </div>
+      <div style="margin-top:16px">
+        <div style="display:flex;gap:8px">
+          <input type="text" placeholder="输入介入消息（会话暂停时可发送）" style="flex:1;padding:10px 14px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;background:#f9fafb" disabled>
+          <button class="btn btn-primary" disabled>发送</button>
+        </div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:4px">⏸ 需先暂停会话才能介入</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 会议纪要 ===== -->
+<div id="page-minutes" class="page">
+  <div class="page-header">
+    <div>
+      <span style="font-size:13px;color:#6b7280">← 用户登录模块代码评审</span>
+      <h1 style="margin-top:4px">会议纪要</h1>
+    </div>
+    <div class="actions">
+      <button class="btn btn-outline">📥 导出</button>
+      <button class="btn btn-outline">🖨 打印</button>
+    </div>
+  </div>
+  <div style="padding:16px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;margin-bottom:16px;display:flex;gap:24px;font-size:13px;color:#6b7280">
+    <span>📋 范式：<strong>模拟法庭</strong></span>
+    <span>👥 参与：<strong>3 角色</strong></span>
+    <span>⏱ 耗时：<strong>15 分钟</strong></span>
+    <span>📅 <strong>2026-05-02 10:00 → 10:15</strong></span>
+  </div>
+
+  <div class="minutes-section">
+    <h3>📌 关键决策</h3>
+    <div class="decision-item" style="border-left-color:#16a34a">
+      <div class="topic">✅ SQL 注入防护 — <span style="color:#16a34a;font-weight:500">高置信度</span></div>
+      <div class="conclusion">现有参数化查询已覆盖，但需补充输入长度校验和特殊字符过滤</div>
+    </div>
+    <div class="decision-item" style="border-left-color:#ca8a04">
+      <div class="topic">⚠️ 缓存策略分歧 — <span style="color:#ca8a04;font-weight:500">中等置信度</span></div>
+      <div class="conclusion">缓存非敏感数据，敏感数据绕过缓存。达成折中方案</div>
+    </div>
+    <div class="decision-item" style="border-left-color:#2563eb">
+      <div class="topic">📝 代码注释规范 — <span style="color:#2563eb;font-weight:500">中置信度</span></div>
+      <div class="conclusion">为所有 service 方法添加中文注释，要求在本次迭代中完成</div>
+    </div>
+  </div>
+
+  <div class="minutes-section">
+    <h3>⚡ 评分矩阵</h3>
+    <table>
+      <tr><th>维度</th><th>安全审查</th><th>性能分析</th><th>可维护性</th><th>加权总分</th></tr>
+      <tr><td style="font-weight:500">方案 A（参数化查询）</td><td>85</td><td>70</td><td>90</td><td><strong>81</strong></td></tr>
+      <tr><td style="font-weight:500">方案 B（ORM 封装）</td><td>60</td><td>95</td><td>75</td><td><strong>77</strong></td></tr>
+      <tr><td style="font-weight:500">权重</td><td>30%</td><td>35%</td><td>35%</td><td>100%</td></tr>
+    </table>
+  </div>
+
+  <div class="minutes-section">
+    <h3>🔗 推理链</h3>
+    <div style="display:flex;gap:8px;align-items:center;font-size:13px">
+      <span style="padding:6px 12px;background:#dbeafe;border-radius:6px">Round 1<br><span style="font-size:11px;color:#6b7280">作者陈述</span></span>
+      <span style="color:#9ca3af">→</span>
+      <span style="padding:6px 12px;background:#dbeafe;border-radius:6px">Round 2<br><span style="font-size:11px;color:#6b7280">交叉审查</span></span>
+      <span style="color:#9ca3af">→</span>
+      <span style="padding:6px 12px;background:#dbeafe;border-radius:6px">Round 3<br><span style="font-size:11px;color:#6b7280">作者回应</span></span>
+      <span style="color:#9ca3af">→</span>
+      <span style="padding:6px 12px;background:#16a34a;color:#fff;border-radius:6px">✅ 结论</span>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 任务看板 ===== -->
+<div id="page-tasks" class="page">
+  <div class="page-header">
+    <div>
+      <span style="font-size:13px;color:#6b7280">← Q2 产品需求评审</span>
+      <h1 style="margin-top:4px">任务看板</h1>
+    </div>
+    <div class="actions">
+      <select style="padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px">
+        <option>全部任务</option>
+        <option>我的任务</option>
+        <option>高优先级</option>
+      </select>
+    </div>
+  </div>
+  <div class="board">
+    <div class="board-col">
+      <div class="board-col-header">📋 待分配 <span style="background:#d1d5db;color:#fff;border-radius:9999px;padding:0 6px;font-size:11px">3</span></div>
+      <div class="board-card">
+        <div class="board-card-title">修复 SQL 注入漏洞</div>
+        <div class="board-card-meta"><span class="badge badge-critical">Critical</span></div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:6px">安全审查员 · 2026-05-02</div>
+      </div>
+      <div class="board-card">
+        <div class="board-card-title">添加安全审计日志</div>
+        <div class="board-card-meta"><span class="badge badge-high">High</span></div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:6px">2026-05-02</div>
+      </div>
+    </div>
+    <div class="board-col">
+      <div class="board-col-header">🔧 进行中 <span style="background:#2563eb;color:#fff;border-radius:9999px;padding:0 6px;font-size:11px">2</span></div>
+      <div class="board-card">
+        <div class="board-card-title">优化数据库查询性能</div>
+        <div class="board-card-meta"><span class="badge badge-high">High</span> <span class="badge badge-running">性能分析</span></div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:6px">分配: agent_perf_01</div>
+      </div>
+      <div class="board-card">
+        <div class="board-card-title">补充代码注释文档</div>
+        <div class="board-card-meta"><span class="badge badge-medium">Medium</span></div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:6px">分配: agent_doc_01</div>
+      </div>
+    </div>
+    <div class="board-col">
+      <div class="board-col-header">🔍 待验证 <span style="background:#ca8a04;color:#fff;border-radius:9999px;padding:0 6px;font-size:11px">1</span></div>
+      <div class="board-card">
+        <div class="board-card-title">添加输入长度校验</div>
+        <div class="board-card-meta"><span class="badge badge-medium">Medium</span> <span class="badge badge-paused">待验证</span></div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:6px">分配: agent_sec_01</div>
+      </div>
+    </div>
+    <div class="board-col">
+      <div class="board-col-header">✅ 已完成 <span style="background:#16a34a;color:#fff;border-radius:9999px;padding:0 6px;font-size:11px">8</span></div>
+      <div class="board-card" style="opacity:.7">
+        <div class="board-card-title">更新 API 文档</div>
+        <div class="board-card-meta"><span class="badge badge-medium">Medium</span></div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:6px">张三 · 2026-05-01</div>
+      </div>
+    </div>
+    <div class="board-col">
+      <div class="board-col-header">❌ 未通过 <span style="background:#dc2626;color:#fff;border-radius:9999px;padding:0 6px;font-size:11px">1</span></div>
+      <div class="board-card" style="opacity:.7">
+        <div class="board-card-title">缓存策略优化方案</div>
+        <div class="board-card-meta"><span class="badge badge-critical">Critical</span> <span class="badge" style="background:#fef2f2;color:#dc2626">未通过</span></div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:6px">需要重新设计</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 角色管理 ===== -->
+<div id="page-roles" class="page">
+  <div class="page-header">
+    <h1>角色管理</h1>
+    <div class="actions"><button class="btn btn-primary" onclick="toggleModal('role-modal')">+ 创建角色</button></div>
+  </div>
+  <div class="card-grid">
+    <div class="card"><div class="card-title">🔴 安全审查员</div><div class="card-desc">Security Auditor · 系统预置</div><div class="card-meta"><span class="badge badge-running">security-audit</span> <span class="badge badge-running">chinese-code-review</span></div></div>
+    <div class="card"><div class="card-title">🟢 性能分析员</div><div class="card-desc">Performance Analyst · 系统预置</div><div class="card-meta"><span class="badge badge-running">performance-analysis</span></div></div>
+    <div class="card"><div class="card-title">🟡 可维护性评估员</div><div class="card-desc">Maintainability Reviewer · 系统预置</div><div class="card-meta"></div></div>
+    <div class="card"><div class="card-title">🟣 产品经理</div><div class="card-desc">Product Manager · 系统预置</div><div class="card-meta"></div></div>
+    <div class="card"><div class="card-title">🔵 技术负责人</div><div class="card-desc">Tech Lead · 系统预置</div><div class="card-meta"></div></div>
+    <div class="card"><div class="card-title">🟠 质疑者</div><div class="card-desc">Devil's Advocate · 系统预置</div><div class="card-meta"></div></div>
+  </div>
+</div>
+
+<!-- ===== 模型配置 ===== -->
+<div id="page-models" class="page">
+  <div class="page-header"><h1>模型配置</h1><div class="actions"><button class="btn btn-primary">+ 添加配置</button></div></div>
+  <div class="list">
+    <div class="list-item"><div class="left"><div><div class="title">🤖 OpenAI / gpt-4o</div><div class="sub">https://api.openai.com/v1</div></div></div><div class="right"><span class="badge badge-running">已启用</span></div></div>
+    <div class="list-item"><div class="left"><div><div class="title">🤖 Anthropic / claude-3.5-sonnet</div><div class="sub">https://api.anthropic.com</div></div></div><div class="right"><span class="badge badge-running">已启用</span></div></div>
+    <div class="list-item"><div class="left"><div><div class="title">🤖 Ollama / deepseek-coder</div><div class="sub">http://localhost:11434</div></div></div><div class="right"><span class="badge badge-ended">未启用</span></div></div>
+  </div>
+</div>
+
+<!-- ===== 登录页 ===== -->
+<div id="page-login" class="page" style="max-width:420px;margin:60px auto">
+  <div style="text-align:center;margin-bottom:32px">
+    <div style="font-size:40px;margin-bottom:8px">🔄</div>
+    <h1 style="font-size:22px">MMCS 多模型协作系统</h1>
+    <p style="color:#6b7280;font-size:14px">登录以继续</p>
+  </div>
+  <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:24px">
+    <div class="form-group"><label>邮箱</label><input type="email" placeholder="user@example.com"></div>
+    <div class="form-group"><label>密码</label><input type="password" placeholder="••••••••"></div>
+    <button class="btn btn-primary" style="width:100%;padding:10px;font-size:15px;margin-top:8px">登录</button>
+    <p style="text-align:center;font-size:13px;color:#6b7280;margin-top:16px">没有账号？<span style="color:#2563eb;cursor:pointer">注册</span></p>
+  </div>
+</div>
+
+<!-- ===== Modal: 创建工作区 ===== -->
+<div id="workspace-modal" class="modal-overlay" onclick="if(event.target===this)toggleModal('workspace-modal')">
+  <div class="modal">
+    <h2>创建工作区</h2>
+    <div class="form-group"><label>名称</label><input placeholder="如：Q2 产品需求评审"></div>
+    <div class="form-group"><label>描述</label><textarea placeholder="工作区用途描述..."></textarea></div>
+    <div class="form-group"><label>模式</label>
+      <select><option>共享模式（多轮对话）</option><option>独立模式（单次会议）</option></select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="toggleModal('workspace-modal')">取消</button>
+      <button class="btn btn-primary">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Modal: 创建角色 ===== -->
+<div id="role-modal" class="modal-overlay" onclick="if(event.target===this)toggleModal('role-modal')">
+  <div class="modal">
+    <h2>创建角色</h2>
+    <div class="form-group"><label>角色名称</label><input placeholder="如：UX 体验专家"></div>
+    <div class="form-group"><label>职位头衔</label><input placeholder="如：User Experience Designer"></div>
+    <div class="form-group">
+      <label>核心特质</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><span style="font-size:12px">激进</span><input type="range" min="1" max="10" value="5" style="width:100%"></div>
+        <div><span style="font-size:12px">乐观</span><input type="range" min="1" max="10" value="7" style="width:100%"></div>
+        <div><span style="font-size:12px">创意</span><input type="range" min="1" max="10" value="8" style="width:100%"></div>
+        <div><span style="font-size:12px">细节</span><input type="range" min="1" max="10" value="5" style="width:100%"></div>
+      </div>
+    </div>
+    <div class="form-group"><label>Skills</label><div style="display:flex;gap:4px;flex-wrap:wrap"><span class="badge badge-running" style="cursor:pointer">chinese-code-review ✕</span><span class="badge badge-draft" style="cursor:pointer;border:1px dashed #d1d5db">+ 添加</span></div></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="toggleModal('role-modal')">取消</button>
+      <button class="btn btn-primary">创建</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function switchPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  const page = document.getElementById('page-' + id);
+  if (page) page.classList.add('active');
+  if (id === 'workspaces' || id === 'roles' || id === 'models' || id === 'login') {
+    document.querySelectorAll('.nav-tab').forEach(t => {
+      if (t.textContent.includes('工作区') && id === 'workspaces') t.classList.add('active');
+      if (t.textContent.includes('角色') && id === 'roles') t.classList.add('active');
+      if (t.textContent.includes('模型') && id === 'models') t.classList.add('active');
+      if (t.textContent.includes('登录') && id === 'login') t.classList.add('active');
+    });
+  }
+}
+
+function toggleModal(id) {
+  const m = document.getElementById(id);
+  m.classList.toggle('active');
+}
+</script>
+</body>
+</html>
