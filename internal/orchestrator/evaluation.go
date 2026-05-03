@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/wjames2000/mmcs/internal/model_gateway"
+	"github.com/wjames2000/mmcs/internal/session"
 	"github.com/wjames2000/mmcs/internal/stream"
 )
 
@@ -33,6 +34,10 @@ type EvaluationConfig struct {
 	Options      []EvaluationOption    // 待评估选项列表
 	Criteria     []EvaluationCriterion // 评估标准列表
 	CriticRoleID string                // 批评者角色 ID（可选）
+
+	// InterruptCh 和 ResumeCh 用于支持人类介入（Pause/Resume）
+	InterruptCh chan *session.InterruptSignal `json:"-"`
+	ResumeCh    chan *session.ResumeSignal    `json:"-"`
 }
 
 // ScoringResult 单个专家评分结果
@@ -144,6 +149,9 @@ func (e *EvaluationOrchestrator) Execute(
 
 	state := NewDiscussionState(sessionID, 1, bridge)
 	state.Roles = roleContexts
+	if config.InterruptCh != nil && config.ResumeCh != nil {
+		state.SetInterruptChannels(config.InterruptCh, config.ResumeCh)
+	}
 	state.IncrementRound()
 
 	// 分离批评者角色
@@ -170,6 +178,12 @@ func (e *EvaluationOrchestrator) Execute(
 	if progressCh != nil {
 		progressCh <- "专家评分中..."
 	}
+	if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+		if progressCh != nil {
+			close(progressCh)
+		}
+		return nil, ctx.Err()
+	}
 	scoringResults := e.executeExpertScoring(ctx, experts, config, state, bridge)
 
 	// ===== 阶段 2: 批评者质疑 =====
@@ -177,6 +191,12 @@ func (e *EvaluationOrchestrator) Execute(
 	if criticRC != nil {
 		if progressCh != nil {
 			progressCh <- "批评者提出质疑..."
+		}
+		if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+			if progressCh != nil {
+				close(progressCh)
+			}
+			return nil, ctx.Err()
 		}
 		criticFeedbacks = e.executeCriticChallenge(ctx, criticRC, config, scoringResults, state, bridge)
 	}
@@ -187,6 +207,12 @@ func (e *EvaluationOrchestrator) Execute(
 		if progressCh != nil {
 			progressCh <- "专家回应质疑并调整评分..."
 		}
+		if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+			if progressCh != nil {
+				close(progressCh)
+			}
+			return nil, ctx.Err()
+		}
 		adjustedResults = e.executeScoreAdjustment(ctx, experts, config, scoringResults, criticFeedbacks, state, bridge)
 	}
 
@@ -194,6 +220,7 @@ func (e *EvaluationOrchestrator) Execute(
 	if progressCh != nil {
 		progressCh <- "生成决策矩阵..."
 	}
+	CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge)
 	output := e.executeMatrixGeneration(config, scoringResults, adjustedResults, criticFeedbacks, bridge)
 
 	if bridge != nil {

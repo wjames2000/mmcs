@@ -68,8 +68,9 @@ func ValidateTransition(from, to Status) error {
 			StatusReviewing: true,
 		},
 		StatusReviewing: {
-			StatusCompleted: true,
-			StatusRejected:  true,
+			StatusCompleted:  true,
+			StatusRejected:   true,
+			StatusInProgress: true, // 验证退回重试
 		},
 		StatusRejected: {
 			StatusInProgress: true,

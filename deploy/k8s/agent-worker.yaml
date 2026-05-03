@@ -1,0 +1,79 @@
+# =============================================================================
+# MMCS Agent Worker — Deployment (无需 Service)
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mmcs-agent-worker
+  namespace: mmcs
+  labels:
+    app.kubernetes.io/name: mmcs-agent-worker
+    app.kubernetes.io/component: agent-worker
+    app.kubernetes.io/part-of: mmcs
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mmcs-agent-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mmcs-agent-worker
+        app.kubernetes.io/component: agent-worker
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: agent-worker
+          image: mmcs/agent-worker:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MMCS_ENV
+              value: "production"
+            - name: MMCS_DATABASE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: mmcs-secret
+                  key: database-dsn
+            - name: MMCS_REDIS_ADDR
+              value: "mmcs-redis:6379"
+            - name: MMCS_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mmcs-secret
+                  key: redis-password
+            - name: MMCS_AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mmcs-secret
+                  key: jwt-secret
+            - name: MMCS_CRYPTO_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mmcs-secret
+                  key: crypto-master-key
+            - name: MMCS_MODEL_GATEWAY_PROVIDERS_OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mmcs-secret
+                  key: openai-api-key
+          envFrom:
+            - configMapRef:
+                name: mmcs-config
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "4"
+              memory: "2Gi"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/wjames2000/mmcs/internal/model_gateway"
+	"github.com/wjames2000/mmcs/internal/session"
 	"github.com/wjames2000/mmcs/internal/stream"
 )
 
@@ -16,6 +17,10 @@ type FreeChatConfig struct {
 	Topic        string   // 讨论话题
 	CustomPrompt string   // 用户自定义额外提示
 	MaxRounds    int      // 最大讨论轮次
+
+	// InterruptCh 和 ResumeCh 用于支持人类介入（Pause/Resume）
+	InterruptCh chan *session.InterruptSignal `json:"-"`
+	ResumeCh    chan *session.ResumeSignal    `json:"-"`
 }
 
 // FreeChatOrchestrator 自由群聊范式编排器
@@ -73,6 +78,9 @@ func (f *FreeChatOrchestrator) Execute(
 	// 创建讨论状态
 	state := NewDiscussionState(sessionID, config.MaxRounds, bridge)
 	state.Roles = roleContexts
+	if config.InterruptCh != nil && config.ResumeCh != nil {
+		state.SetInterruptChannels(config.InterruptCh, config.ResumeCh)
+	}
 
 	// 推送开始事件
 	if bridge != nil {
@@ -98,6 +106,15 @@ func (f *FreeChatOrchestrator) Execute(
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
+		}
+
+		// 检查中断/恢复信号（人类介入）
+		if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+			log.Info().Str("session_id", sessionID).Int("round", round).Msg("自由群聊在中断后取消")
+			if progressCh != nil {
+				close(progressCh)
+			}
+			return nil, ctx.Err()
 		}
 
 		if progressCh != nil {

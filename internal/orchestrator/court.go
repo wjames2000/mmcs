@@ -7,6 +7,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/wjames2000/mmcs/internal/model_gateway"
+	"github.com/wjames2000/mmcs/internal/session"
 	"github.com/wjames2000/mmcs/internal/stream"
 )
 
@@ -17,6 +18,10 @@ type CourtConfig struct {
 	CustomPrompt string   // 用户自定义额外提示
 	AuthorRoleID string   // 代码作者/方案提出者角色 ID
 	MaxRounds    int      // 最大评审-回应轮次
+
+	// InterruptCh 和 ResumeCh 用于支持人类介入（Pause/Resume）
+	InterruptCh chan *session.InterruptSignal `json:"-"`
+	ResumeCh    chan *session.ResumeSignal    `json:"-"`
 }
 
 // CourtOrchestrator 法庭范式编排器
@@ -75,6 +80,9 @@ func (c *CourtOrchestrator) Execute(
 	// 创建讨论状态
 	state := NewDiscussionState(sessionID, config.MaxRounds, bridge)
 	state.Roles = roleContexts
+	if config.InterruptCh != nil && config.ResumeCh != nil {
+		state.SetInterruptChannels(config.InterruptCh, config.ResumeCh)
+	}
 
 	// 分离作者角色和审查员角色
 	var authorRC *RoleContext
@@ -104,6 +112,13 @@ func (c *CourtOrchestrator) Execute(
 	if progressCh != nil {
 		progressCh <- "作者陈述中..."
 	}
+	// 检查中断（人类可在阶段之间介入）
+	if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+		if progressCh != nil {
+			close(progressCh)
+		}
+		return nil, ctx.Err()
+	}
 	minutes, err := c.executeAuthorStatement(ctx, authorRC, config.Topic, state, bridge)
 	if err != nil {
 		return nil, err
@@ -114,6 +129,12 @@ func (c *CourtOrchestrator) Execute(
 		if progressCh != nil {
 			progressCh <- fmt.Sprintf("%d 位审查员并行审查中...", len(reviewers))
 		}
+		if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+			if progressCh != nil {
+				close(progressCh)
+			}
+			return nil, ctx.Err()
+		}
 		c.executeReviewPhase(ctx, reviewers, config.Topic, state, bridge)
 	} else {
 		log.Warn().Str("session_id", sessionID).Msg("没有审查员角色，跳过审查阶段")
@@ -123,6 +144,12 @@ func (c *CourtOrchestrator) Execute(
 	if progressCh != nil {
 		progressCh <- "作者回应审查意见..."
 	}
+	if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+		if progressCh != nil {
+			close(progressCh)
+		}
+		return nil, ctx.Err()
+	}
 	if err := c.executeAuthorResponse(ctx, authorRC, state, bridge); err != nil {
 		return nil, err
 	}
@@ -131,6 +158,8 @@ func (c *CourtOrchestrator) Execute(
 	if progressCh != nil {
 		progressCh <- "生成讨论总结..."
 	}
+	// 最终阶段前也检查中断
+	CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge)
 	summary := c.executeFinalSummary(state, bridge)
 
 	// 推送讨论结束事件

@@ -1,0 +1,46 @@
+# =============================================================================
+# MMCS ConfigMap — 非敏感配置
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mmcs-config
+  namespace: mmcs
+  labels:
+    app.kubernetes.io/name: mmcs
+    app.kubernetes.io/part-of: mmcs
+data:
+  # 服务配置
+  MMCS_SERVER_HTTP_PORT: "8080"
+  MMCS_SERVER_GRPC_PORT: "9090"
+
+  # 数据库配置
+  MMCS_DATABASE_MAX_OPEN: "50"
+  MMCS_DATABASE_MAX_IDLE: "10"
+
+  # Redis 配置
+  MMCS_REDIS_DB: "0"
+  MMCS_REDIS_POOL_SIZE: "100"
+
+  # Asynq 配置
+  MMCS_ASYNQ_CONCURRENCY: "10"
+
+  # 会话配置
+  MMCS_SESSION_MAX_ROUNDS: "10"
+  MMCS_SESSION_ROUND_TIMEOUT: "300"
+  MMCS_SESSION_GRAPH_POOL_SIZE: "100"
+
+  # Context 配置
+  MMCS_CONTEXT_MAX_TOKENS: "128000"
+  MMCS_CONTEXT_STRATEGY: "truncate_summarize"
+
+  # 模型网关配置
+  MMCS_MODEL_GATEWAY_TIMEOUT: "60"
+
+  # 日志配置
+  MMCS_LOG_LEVEL: "info"
+  MMCS_LOG_FORMAT: "json"
+  MMCS_LOG_OUTPUT: "stdout"
+
+  # 数据库 DSN（不含密码，密码在 Secret 中）
+  MMCS_DATABASE_DSN: "postgres://mmcs:$(POSTGRES_PASSWORD)@mmcs-postgres:5432/mmcs?sslmode=disable"

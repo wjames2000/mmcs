@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+	"github.com/wjames2000/mmcs/internal/session"
 	"github.com/wjames2000/mmcs/internal/stream"
 )
 
@@ -15,6 +16,10 @@ type RoundRobinConfig struct {
 	Topic        string   // 讨论话题
 	CustomPrompt string   // 用户自定义额外提示
 	MaxRounds    int
+
+	// InterruptCh 和 ResumeCh 用于支持人类介入（Pause/Resume）
+	InterruptCh chan *session.InterruptSignal `json:"-"`
+	ResumeCh    chan *session.ResumeSignal    `json:"-"`
 }
 
 // RoundRobinOrchestrator 轮询发言范式编排器
@@ -71,14 +76,24 @@ func (r *RoundRobinOrchestrator) Execute(
 	// 2. 创建讨论状态
 	state := NewDiscussionState(sessionID, config.MaxRounds, bridge)
 	state.Roles = roleContexts
+	if config.InterruptCh != nil && config.ResumeCh != nil {
+		state.SetInterruptChannels(config.InterruptCh, config.ResumeCh)
+	}
 
 	// 3. 主循环：每轮发言 → 评估
 	for round := 1; round <= config.MaxRounds; round++ {
+		// 检查上下文取消
 		select {
 		case <-ctx.Done():
 			log.Info().Str("session_id", sessionID).Int("round", round).Msg("讨论被取消")
 			return nil, ctx.Err()
 		default:
+		}
+
+		// 检查中断/恢复信号（人类介入）
+		if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+			log.Info().Str("session_id", sessionID).Int("round", round).Msg("讨论在中断后取消")
+			return nil, ctx.Err()
 		}
 
 		state.IncrementRound()

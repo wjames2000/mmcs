@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
 	"github.com/wjames2000/mmcs/internal/role"
+	"github.com/wjames2000/mmcs/internal/stream"
 	"github.com/wjames2000/mmcs/pkg/util"
 )
 
@@ -16,11 +18,25 @@ type Service struct {
 	repo      *Repository
 	graphPool *GraphPool
 	roleSvc   *role.Service
+
+	mu           sync.RWMutex
+	runtimeChans map[string]*SessionChannels // sessionID → runtime channels
+	hubRegistry  *stream.HubRegistry         // 用于广播 SSE 事件
+}
+
+// SetHubRegistry 设置 Hub 注册表（支持从外部注入）
+func (s *Service) SetHubRegistry(hr *stream.HubRegistry) {
+	s.hubRegistry = hr
 }
 
 // NewService 创建会话服务
 func NewService(repo *Repository, graphPool *GraphPool, roleSvc *role.Service) *Service {
-	return &Service{repo: repo, graphPool: graphPool, roleSvc: roleSvc}
+	return &Service{
+		repo:         repo,
+		graphPool:    graphPool,
+		roleSvc:      roleSvc,
+		runtimeChans: make(map[string]*SessionChannels),
+	}
 }
 
 // CreateRequest 创建会话请求
@@ -154,8 +170,45 @@ func (s *Service) Start(ctx context.Context, id string) error {
 	return nil
 }
 
+// InitChannels 初始化会话运行时 channel
+func (s *Service) InitChannels(sessionID string) *SessionChannels {
+	ch := NewSessionChannels()
+	s.mu.Lock()
+	s.runtimeChans[sessionID] = ch
+	s.mu.Unlock()
+	return ch
+}
+
+// GetChannels 获取会话运行时 channel
+func (s *Service) GetChannels(sessionID string) (*SessionChannels, bool) {
+	s.mu.RLock()
+	ch, ok := s.runtimeChans[sessionID]
+	s.mu.RUnlock()
+	return ch, ok
+}
+
+// RemoveChannels 移除会话运行时 channel
+func (s *Service) RemoveChannels(sessionID string) {
+	s.mu.Lock()
+	delete(s.runtimeChans, sessionID)
+	s.mu.Unlock()
+}
+
+// broadcastSessionEvent 广播会话级别 SSE 事件
+func (s *Service) broadcastSessionEvent(sessionID, eventType string, data interface{}) {
+	if s.hubRegistry == nil {
+		return
+	}
+	hub := s.hubRegistry.GetOrCreate(sessionID)
+	hub.Broadcast(&stream.Event{
+		Type: eventType,
+		Data: data,
+	})
+}
+
 // Pause 暂停会话（running → paused）
-func (s *Service) Pause(ctx context.Context, id string) error {
+// 向运行中的编排器发送中断信号
+func (s *Service) Pause(ctx context.Context, id string, nodeName string, message string) error {
 	sess, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -165,19 +218,38 @@ func (s *Service) Pause(ctx context.Context, id string) error {
 		return err
 	}
 
+	// 发送中断信号到运行中的编排器
+	if ch, ok := s.GetChannels(id); ok {
+		select {
+		case ch.InterruptCh <- &InterruptSignal{
+			NodeName: nodeName,
+			Message:  message,
+			UserID:   sess.CreatorID,
+		}:
+		case <-time.After(time.Second * 5):
+			return fmt.Errorf("发送中断信号超时")
+		}
+	}
+
 	if err := s.repo.UpdateStatus(ctx, id, StatusPaused); err != nil {
 		return fmt.Errorf("暂停会话失败: %w", err)
 	}
 
-	// 从池中移除实例
-	s.graphPool.Remove(id)
+	// 广播 SSE 事件
+	s.broadcastSessionEvent(id, "session.paused", map[string]interface{}{
+		"session_id": id,
+		"status":     "paused",
+		"message":    message,
+		"node_name":  nodeName,
+	})
 
-	log.Info().Str("session_id", id).Msg("会话已暂停")
+	log.Info().Str("session_id", id).Str("node_name", nodeName).Msg("会话已暂停")
 	return nil
 }
 
 // Resume 恢复会话（paused → running）
-func (s *Service) Resume(ctx context.Context, id string) error {
+// 向暂停中的编排器发送恢复信号
+func (s *Service) Resume(ctx context.Context, id string, message string) error {
 	sess, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -190,6 +262,22 @@ func (s *Service) Resume(ctx context.Context, id string) error {
 	if err := s.repo.UpdateStatus(ctx, id, StatusRunning); err != nil {
 		return fmt.Errorf("恢复会话失败: %w", err)
 	}
+
+	// 发送恢复信号到暂停中的编排器
+	if ch, ok := s.GetChannels(id); ok {
+		select {
+		case ch.ResumeCh <- &ResumeSignal{Message: message}:
+		case <-time.After(time.Second * 5):
+			return fmt.Errorf("发送恢复信号超时")
+		}
+	}
+
+	// 广播 SSE 事件
+	s.broadcastSessionEvent(id, "session.resumed", map[string]interface{}{
+		"session_id": id,
+		"status":     "running",
+		"message":    message,
+	})
 
 	log.Info().Str("session_id", id).Msg("会话已恢复")
 	return nil
@@ -212,6 +300,9 @@ func (s *Service) Terminate(ctx context.Context, id string) error {
 
 	// 从池中移除实例
 	s.graphPool.Remove(id)
+
+	// 清理运行时 channel
+	s.RemoveChannels(id)
 
 	log.Info().Str("session_id", id).Msg("会话已终止")
 	return nil

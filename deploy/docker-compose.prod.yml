@@ -1,0 +1,175 @@
+# =============================================================================
+# MMCS 生产环境 Docker Compose
+# 使用: docker compose -f deploy/docker-compose.prod.yml up -d
+# =============================================================================
+
+version: "3.9"
+
+networks:
+  mmcs-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+services:
+  # ===== PostgreSQL =====
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mmcs-postgres
+    restart: unless-stopped
+    networks:
+      - mmcs-net
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mmcs}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mmcs}
+      POSTGRES_DB: ${POSTGRES_DB:-mmcs}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../migrations/001_init.up.sql:/docker-entrypoint-initdb.d/001_init.up.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mmcs} -d ${POSTGRES_DB:-mmcs}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===== Redis =====
+  redis:
+    image: redis:7-alpine
+    container_name: mmcs-redis
+    restart: unless-stopped
+    networks:
+      - mmcs-net
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===== API Server =====
+  api-server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: mmcs-api-server
+    restart: unless-stopped
+    networks:
+      - mmcs-net
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      MMCS_SERVER_HTTP_PORT: 8080
+      MMCS_DATABASE_DSN: "postgres://${POSTGRES_USER:-mmcs}:${POSTGRES_PASSWORD:-mmcs}@postgres:5432/${POSTGRES_DB:-mmcs}?sslmode=disable"
+      MMCS_REDIS_ADDR: "redis:6379"
+      MMCS_REDIS_PASSWORD: ""
+      MMCS_REDIS_DB: 0
+      MMCS_AUTH_JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      MMCS_CRYPTO_MASTER_KEY: ${CRYPTO_MASTER_KEY:-}
+      MMCS_LOG_LEVEL: ${LOG_LEVEL:-info}
+      MMCS_LOG_FORMAT: json
+      MMCS_ASYNQ_CONCURRENCY: "10"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MMCS_MODEL_GATEWAY_PROVIDERS_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===== Agent Worker =====
+  agent-worker:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: mmcs-agent-worker
+    restart: unless-stopped
+    networks:
+      - mmcs-net
+    environment:
+      MMCS_SERVER_HTTP_PORT: 8081
+      MMCS_DATABASE_DSN: "postgres://${POSTGRES_USER:-mmcs}:${POSTGRES_PASSWORD:-mmcs}@postgres:5432/${POSTGRES_DB:-mmcs}?sslmode=disable"
+      MMCS_REDIS_ADDR: "redis:6379"
+      MMCS_REDIS_PASSWORD: ""
+      MMCS_REDIS_DB: 0
+      MMCS_LOG_LEVEL: ${LOG_LEVEL:-info}
+      MMCS_LOG_FORMAT: json
+      MMCS_ASYNQ_CONCURRENCY: "10"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MMCS_MODEL_GATEWAY_PROVIDERS_OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 2G
+        reservations:
+          cpus: "1"
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

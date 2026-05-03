@@ -1,0 +1,130 @@
+# =============================================================================
+# MMCS API Server — Deployment & Service
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mmcs-api-server
+  namespace: mmcs
+  labels:
+    app.kubernetes.io/name: mmcs-api-server
+    app.kubernetes.io/component: api-server
+    app.kubernetes.io/part-of: mmcs
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mmcs-api-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mmcs-api-server
+        app.kubernetes.io/component: api-server
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: api-server
+          image: mmcs/api-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+            - containerPort: 9090
+              name: grpc
+              protocol: TCP
+          env:
+            - name: MMCS_ENV
+              value: "production"
+            - name: MMCS_DATABASE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: mmcs-secret
+                  key: database-dsn
+            - name: MMCS_REDIS_ADDR
+              value: "mmcs-redis:6379"
+            - name: MMCS_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mmcs-secret
+                  key: redis-password
+            - name: MMCS_AUTH_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mmcs-secret
+                  key: jwt-secret
+            - name: MMCS_CRYPTO_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mmcs-secret
+                  key: crypto-master-key
+            - name: MMCS_MODEL_GATEWAY_PROVIDERS_OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mmcs-secret
+                  key: openai-api-key
+          envFrom:
+            - configMapRef:
+                name: mmcs-config
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 2
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "2"
+              memory: "1Gi"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mmcs-api-server
+  namespace: mmcs
+  labels:
+    app.kubernetes.io/name: mmcs-api-server
+    app.kubernetes.io/component: api-server
+    app.kubernetes.io/part-of: mmcs
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+    - name: grpc
+      port: 9090
+      targetPort: grpc
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: mmcs-api-server

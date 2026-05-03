@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/wjames2000/mmcs/internal/model_gateway"
 	"github.com/wjames2000/mmcs/internal/role"
+	"github.com/wjames2000/mmcs/internal/session"
 	"github.com/wjames2000/mmcs/internal/stream"
 )
 
@@ -29,6 +30,10 @@ type DiscussionState struct {
 	CurrentRound int
 	MaxRounds    int
 	Bridge       *stream.Bridge
+
+	// InterruptCh 和 ResumeCh 用于支持人类介入（Pause/Resume）
+	InterruptCh <-chan *session.InterruptSignal
+	ResumeCh    <-chan *session.ResumeSignal
 }
 
 // NewDiscussionState 创建讨论状态
@@ -38,6 +43,89 @@ func NewDiscussionState(sessionID string, maxRounds int, bridge *stream.Bridge) 
 		MaxRounds:    maxRounds,
 		CurrentRound: 0,
 		Bridge:       bridge,
+	}
+}
+
+// SetInterruptChannels 设置中断/恢复 channel
+func (s *DiscussionState) SetInterruptChannels(interruptCh <-chan *session.InterruptSignal, resumeCh <-chan *session.ResumeSignal) {
+	s.InterruptCh = interruptCh
+	s.ResumeCh = resumeCh
+}
+
+// CheckInterrupt 检查是否有中断信号
+// 如果有中断信号，暂停执行并等待恢复信号
+// ctx: 外层上下文
+// bridge: SSE 事件桥（可为 nil）
+// returns: true 表示需要继续执行，false 表示 ctx 已取消
+func CheckInterrupt(ctx context.Context, interruptCh <-chan *session.InterruptSignal, resumeCh <-chan *session.ResumeSignal, bridge *stream.Bridge) bool {
+	if interruptCh == nil {
+		return true
+	}
+
+	select {
+	case sig := <-interruptCh:
+		// 广播暂停事件
+		if bridge != nil {
+			_ = bridge.Push(&stream.GraphEvent{
+				Type:      "session.paused",
+				NodeName:  sig.NodeName,
+				Content:   sig.Message,
+				Timestamp: time.Now(),
+			})
+		}
+
+		// 等待恢复信号
+		select {
+		case <-resumeCh:
+			// 广播恢复事件
+			if bridge != nil {
+				_ = bridge.Push(&stream.GraphEvent{
+					Type:      "session.resumed",
+					Timestamp: time.Now(),
+				})
+			}
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	case <-ctx.Done():
+		return false
+	default:
+		return true
+	}
+}
+
+// WaitForInterrupt 阻塞等待中断信号（用于暂停点）
+func WaitForInterrupt(ctx context.Context, interruptCh <-chan *session.InterruptSignal, resumeCh <-chan *session.ResumeSignal, bridge *stream.Bridge) bool {
+	if interruptCh == nil {
+		return true
+	}
+
+	select {
+	case sig := <-interruptCh:
+		if bridge != nil {
+			_ = bridge.Push(&stream.GraphEvent{
+				Type:      "session.paused",
+				NodeName:  sig.NodeName,
+				Content:   sig.Message,
+				Timestamp: time.Now(),
+			})
+		}
+
+		select {
+		case <-resumeCh:
+			if bridge != nil {
+				_ = bridge.Push(&stream.GraphEvent{
+					Type:      "session.resumed",
+					Timestamp: time.Now(),
+				})
+			}
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	case <-ctx.Done():
+		return false
 	}
 }
 

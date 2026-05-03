@@ -1,0 +1,130 @@
+# =============================================================================
+# MMCS PostgreSQL — StatefulSet, PVC & Service
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: mmcs-postgres
+  namespace: mmcs
+  labels:
+    app.kubernetes.io/name: mmcs-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: mmcs
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: mmcs-postgres
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mmcs-postgres-pvc
+  namespace: mmcs
+  labels:
+    app.kubernetes.io/name: mmcs-postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: standard
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mmcs-postgres
+  namespace: mmcs
+  labels:
+    app.kubernetes.io/name: mmcs-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: mmcs
+spec:
+  serviceName: mmcs-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mmcs-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mmcs-postgres
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              value: "mmcs"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mmcs-secret
+                  key: postgres-password
+            - name: POSTGRES_DB
+              value: "mmcs"
+          args:
+            - "-c"
+            - "shared_preload_libraries=vector"
+            - "-c"
+            - "max_connections=200"
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - mmcs
+                - -d
+                - mmcs
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - mmcs
+                - -d
+                - mmcs
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: init-sql
+          configMap:
+            name: mmcs-postgres-init
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 20Gi
+        storageClassName: standard

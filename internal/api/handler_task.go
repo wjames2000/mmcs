@@ -124,7 +124,15 @@ func (h *TaskHandler) UpdateTask(w http.ResponseWriter, r *http.Request) {
 
 	// 如果是状态更新
 	if statusStr, ok := body["status"].(string); ok {
-		if err := h.taskService.UpdateStatus(r.Context(), id, task.Status(statusStr)); err != nil {
+		newStatus := task.Status(statusStr)
+
+		// 阻止从外部将状态改为 reviewing（必须通过验证服务）
+		if newStatus == task.StatusReviewing {
+			middleware.WriteError(w, http.StatusBadRequest, "不允许手动将状态改为 reviewing，请使用验证接口")
+			return
+		}
+
+		if err := h.taskService.UpdateStatus(r.Context(), id, newStatus); err != nil {
 			middleware.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}

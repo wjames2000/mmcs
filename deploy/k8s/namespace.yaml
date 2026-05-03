@@ -1,0 +1,11 @@
+# =============================================================================
+# MMCS Kubernetes 命名空间
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mmcs
+  labels:
+    app.kubernetes.io/name: mmcs
+    app.kubernetes.io/part-of: mmcs
+    app.kubernetes.io/managed-by: kustomize

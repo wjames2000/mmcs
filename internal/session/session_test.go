@@ -243,3 +243,141 @@ func TestGraphPool_ConcurrentAccess(t *testing.T) {
 	wg.Wait()
 	// 不 panic 即通过
 }
+
+// ===== Interrupt/Resume Tests =====
+
+func TestNewSessionChannels(t *testing.T) {
+	ch := NewSessionChannels()
+	assert.NotNil(t, ch)
+	assert.NotNil(t, ch.InterruptCh)
+	assert.NotNil(t, ch.ResumeCh)
+}
+
+func TestInterruptSignal(t *testing.T) {
+	sig := &InterruptSignal{
+		NodeName: "expert_speak",
+		Message:  "请关注安全性",
+		UserID:   "user_123",
+	}
+	assert.Equal(t, "expert_speak", sig.NodeName)
+	assert.Equal(t, "请关注安全性", sig.Message)
+	assert.Equal(t, "user_123", sig.UserID)
+}
+
+func TestResumeSignal(t *testing.T) {
+	sig := &ResumeSignal{
+		Message: "好的，我补充了 SQL 注入的检查",
+	}
+	assert.Equal(t, "好的，我补充了 SQL 注入的检查", sig.Message)
+}
+
+func TestSessionChannels_SendInterrupt(t *testing.T) {
+	ch := NewSessionChannels()
+
+	// 发送中断信号
+	sig := &InterruptSignal{
+		NodeName: "expert_speak",
+		Message:  "请暂停",
+	}
+
+	select {
+	case ch.InterruptCh <- sig:
+	default:
+		t.Fatal("中断 channel 阻塞")
+	}
+
+	// 接收中断信号
+	select {
+	case received := <-ch.InterruptCh:
+		assert.Equal(t, "expert_speak", received.NodeName)
+		assert.Equal(t, "请暂停", received.Message)
+	default:
+		t.Fatal("无法接收中断信号")
+	}
+}
+
+func TestSessionChannels_SendResume(t *testing.T) {
+	ch := NewSessionChannels()
+
+	// 发送恢复信号
+	sig := &ResumeSignal{
+		Message: "继续",
+	}
+
+	select {
+	case ch.ResumeCh <- sig:
+	default:
+		t.Fatal("恢复 channel 阻塞")
+	}
+
+	// 接收恢复信号
+	select {
+	case received := <-ch.ResumeCh:
+		assert.Equal(t, "继续", received.Message)
+	default:
+		t.Fatal("无法接收恢复信号")
+	}
+}
+
+func TestSessionChannels_InterruptThenResume(t *testing.T) {
+	ch := NewSessionChannels()
+
+	// 模拟中断/恢复流程
+	go func() {
+		// 发送中断
+		ch.InterruptCh <- &InterruptSignal{NodeName: "test", Message: "暂停"}
+	}()
+
+	// 接收中断
+	interrupt := <-ch.InterruptCh
+	assert.Equal(t, "test", interrupt.NodeName)
+
+	// 发送恢复
+	go func() {
+		ch.ResumeCh <- &ResumeSignal{Message: "继续"}
+	}()
+
+	// 接收恢复
+	resume := <-ch.ResumeCh
+	assert.Equal(t, "继续", resume.Message)
+}
+
+func TestSessionChannels_InitAndRemove(t *testing.T) {
+	svc := &Service{
+		runtimeChans: make(map[string]*SessionChannels),
+	}
+
+	// 初始化 channel
+	ch := svc.InitChannels("session_1")
+	assert.NotNil(t, ch)
+
+	// 获取 channel
+	gotCh, ok := svc.GetChannels("session_1")
+	assert.True(t, ok)
+	assert.Equal(t, ch, gotCh)
+
+	// 移除 channel
+	svc.RemoveChannels("session_1")
+	_, ok = svc.GetChannels("session_1")
+	assert.False(t, ok)
+}
+
+func TestSessionChannels_ConcurrentAccess(t *testing.T) {
+	svc := &Service{
+		runtimeChans: make(map[string]*SessionChannels),
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			sessionID := "session_test"
+			_ = svc.InitChannels(sessionID)
+			_, _ = svc.GetChannels(sessionID)
+			svc.RemoveChannels(sessionID)
+		}(i)
+	}
+	wg.Wait()
+	// 不 panic 即通过
+}

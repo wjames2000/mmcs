@@ -1,5 +1,6 @@
 // api-server 是 MMCS 的唯一 HTTP 服务入口
-// 提供 REST API + SSE 流式推送，其他服务通过 gRPC 和 Asynq 通信
+// 提供 REST API + SSE 流式推送 + Prometheus 指标 + 健康检查
+// 其他服务通过 Asynq 进行异步任务通信
 package main
 
 import (
@@ -14,6 +15,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/wjames2000/mmcs/config"
 	"github.com/wjames2000/mmcs/internal/api"
+	"github.com/wjames2000/mmcs/internal/audit"
 	"github.com/wjames2000/mmcs/internal/model_gateway"
 	"github.com/wjames2000/mmcs/internal/model_gateway/provider"
 	"github.com/wjames2000/mmcs/internal/orchestrator"
@@ -23,6 +25,7 @@ import (
 	"github.com/wjames2000/mmcs/internal/user"
 	"github.com/wjames2000/mmcs/internal/workspace"
 	"github.com/wjames2000/mmcs/pkg/logger"
+	mmcsmetrics "github.com/wjames2000/mmcs/pkg/metrics"
 	"github.com/wjames2000/mmcs/pkg/postgres"
 	"github.com/wjames2000/mmcs/pkg/redis"
 	"golang.org/x/sync/errgroup"
@@ -84,51 +87,77 @@ func main() {
 		}
 	}()
 
+	// ===== 可观测性初始化 =====
+
+	// 1. Prometheus 指标注册
+	_ = mmcsmetrics.DefaultRegistry()
+	log.Info().Msg("Prometheus 指标初始化完成")
+
+	// 2. 健康检查 Handler
+	healthChecker := &dbHealthChecker{dbPool: dbPool, rdb: rdb}
+	healthHandler := api.NewHealthHandler(healthChecker)
+
 	// ===== 依赖注入 =====
 
-	// 1. 技能注册表
+	// 3. 技能注册表
 	skillRegistry := role.NewSkillRegistry()
 	log.Info().Int("skills", len(skillRegistry.ListNames())).Msg("技能注册表初始化完成")
 
-	// 2. JWT 管理器
+	// 4. JWT 管理器
 	jwtExpiry, err := time.ParseDuration(cfg.Auth.JWTExpiry)
 	if err != nil {
 		log.Fatal().Err(err).Msg("解析 JWT 过期时间失败")
 	}
 	jwtManager := user.NewJWTManager(cfg.Auth.JWTSecret, jwtExpiry)
 
-	// 3. 仓储层
+	// 5. 仓储层
 	userRepo := user.NewRepository(dbPool.Pool)
 	workspaceRepo := workspace.NewRepository(dbPool.Pool)
 	roleRepo := role.NewRepository(dbPool.Pool)
 	sessionRepo := session.NewRepository(dbPool.Pool)
 
-	// 4. 服务层
+	// 6. 服务层
 	userSvc := user.NewService(userRepo, jwtManager)
 	workspaceSvc := workspace.NewService(workspaceRepo)
 	roleSvc := role.NewService(roleRepo, skillRegistry)
 
-	// 5. 模型网关
+	// 7. 模型网关 + Provider 缓存
 	gateway := model_gateway.NewGateway(&cfg.ModelGateway)
 
 	// 注册提供商
 	gateway.RegisterProvider("openai", provider.NewOpenAIProvider)
 	gateway.RegisterProvider("ollama", provider.NewOllamaProvider)
 
-	// 初始化模型（懒加载，此处只是注册工厂）
+	// 创建 Provider 缓存
+	providerCache := model_gateway.NewChatModelCache(100)
+	providerCache.SetOnHit(func(key string) {
+		mmcsmetrics.ProviderCacheHit.WithLabelValues(key).Inc()
+	})
+	providerCache.SetOnMiss(func(key string) {
+		mmcsmetrics.ProviderCacheMiss.WithLabelValues(key).Inc()
+	})
+	log.Info().Msg("Provider 缓存初始化完成")
 
-	// 6. Graph 池 & 会话服务
+	// 8. Graph 池 & 会话服务
 	graphPool := session.NewGraphPool(cfg.Session.GraphPoolSize)
 	sessionSvc := session.NewService(sessionRepo, graphPool, roleSvc)
 
-	// 7. 编排工厂
+	// 设置 GraphPool 大小指标
+	mmcsmetrics.GraphPoolSize.WithLabelValues("capacity").Set(float64(cfg.Session.GraphPoolSize))
+	mmcsmetrics.GraphPoolSize.WithLabelValues("active").Set(float64(graphPool.Len()))
+
+	// 9. 编排工厂
 	orchFactory := orchestrator.NewFactory(roleSvc, skillRegistry, gateway)
 
-	// 8. SSE Hub 注册表
+	// 10. SSE Hub 注册表
 	hubRegistry := stream.NewHubRegistry()
 
-	// 9. 认证中间件
+	// 11. 认证中间件
 	authMiddleware := user.NewAuthMiddleware(jwtManager)
+
+	// 12. 审计日志回调
+	auditCallback := audit.NewAuditCallback(10000)
+	log.Info().Int("audit_buffer_size", 10000).Msg("审计日志回调初始化完成")
 
 	// ===== 注册路由 =====
 	deps := &api.Dependencies{
@@ -139,6 +168,8 @@ func main() {
 		SessionService:      sessionSvc,
 		OrchestratorFactory: orchFactory,
 		HubRegistry:         hubRegistry,
+		HealthHandler:       healthHandler,
+		MetricsHandler:      mmcsmetrics.MetricsHandler(),
 	}
 	handler := api.NewRouter(deps)
 
@@ -163,6 +194,30 @@ func main() {
 		log.Info().Msg("正在关闭 HTTP 服务器...")
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			log.Error().Err(err).Msg("HTTP 服务器关闭异常")
+		}
+
+		// Flush 审计日志
+		if auditCallback.Count() > 0 {
+			log.Info().Int("entries", auditCallback.Count()).Msg("正在写入审计日志...")
+			pgFlushFn := func(ctx context.Context, entries []audit.AuditEntry) error {
+				for _, entry := range entries {
+					inputStr := fmt.Sprintf("%v", entry.Input)
+					outputStr := fmt.Sprintf("%v", entry.Output)
+					_, err := dbPool.Exec(ctx,
+						`INSERT INTO audit_logs (time, session_id, event, node_name, input, output, user_id)
+						 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+						entry.Time, entry.SessionID, entry.Event, entry.NodeName,
+						inputStr, outputStr, entry.UserID,
+					)
+					if err != nil {
+						return fmt.Errorf("写入审计日志失败: %w", err)
+					}
+				}
+				return nil
+			}
+			if err := auditCallback.Flush(shutdownCtx, pgFlushFn); err != nil {
+				log.Error().Err(err).Msg("审计日志 Flush 失败")
+			}
 		}
 
 		// 停止所有运行中的 Graph 实例
@@ -194,4 +249,18 @@ func main() {
 	}
 
 	log.Info().Msg("API Server 已关闭")
+}
+
+// dbHealthChecker 实现 api.HealthChecker 接口
+type dbHealthChecker struct {
+	dbPool *postgres.Pool
+	rdb    *redis.Client
+}
+
+func (c *dbHealthChecker) CheckPostgres() error {
+	return c.dbPool.Ping(context.Background())
+}
+
+func (c *dbHealthChecker) CheckRedis() error {
+	return c.rdb.Ping(context.Background()).Err()
 }

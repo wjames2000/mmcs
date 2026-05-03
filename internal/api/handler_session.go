@@ -138,28 +138,20 @@ func (h *SessionHandler) startOrchestration(ctx context.Context, sessionID strin
 	bridge := stream.NewBridge(hub, 128)
 	bridge.Start(ctx)
 
+	// 初始化中断/恢复 channel
+	ch := h.sessionService.InitChannels(sessionID)
+	defer h.sessionService.RemoveChannels(sessionID)
+
 	// 获取编排器
 	orch, err := h.orchestratorFactory.CreateOrchestrator(orchestrator.ParadigmType(sess.Paradigm))
 	if err != nil {
 		return fmt.Errorf("创建编排器失败: %w", err)
 	}
 
-	roundRobin, ok := orch.(*orchestrator.RoundRobinOrchestrator)
-	if !ok {
-		return fmt.Errorf("不支持的编排器类型")
-	}
-
 	// 提取角色 ID
 	roleIDs := make([]string, len(sessionRoles))
 	for i, sr := range sessionRoles {
 		roleIDs[i] = sr.RoleID
-	}
-
-	// 执行讨论
-	config := &orchestrator.RoundRobinConfig{
-		RoleIDs:   roleIDs,
-		Topic:     sess.Title,
-		MaxRounds: sess.MaxRounds,
 	}
 
 	progressCh := make(chan string, 10)
@@ -169,15 +161,71 @@ func (h *SessionHandler) startOrchestration(ctx context.Context, sessionID strin
 		}
 	}()
 
-	_, err = roundRobin.Execute(ctx, sessionID, config, bridge, progressCh)
-	if err != nil {
+	// 根据范式类型执行
+	var execErr error
+	switch orch := orch.(type) {
+	case *orchestrator.RoundRobinOrchestrator:
+		config := &orchestrator.RoundRobinConfig{
+			RoleIDs:     roleIDs,
+			Topic:       sess.Title,
+			MaxRounds:   sess.MaxRounds,
+			InterruptCh: ch.InterruptCh,
+			ResumeCh:    ch.ResumeCh,
+		}
+		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
+
+	case *orchestrator.CourtOrchestrator:
+		config := &orchestrator.CourtConfig{
+			RoleIDs:     roleIDs,
+			Topic:       sess.Title,
+			MaxRounds:   sess.MaxRounds,
+			InterruptCh: ch.InterruptCh,
+			ResumeCh:    ch.ResumeCh,
+		}
+		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
+
+	case *orchestrator.EvaluationOrchestrator:
+		config := &orchestrator.EvaluationConfig{
+			RoleIDs:     roleIDs,
+			Topic:       sess.Title,
+			InterruptCh: ch.InterruptCh,
+			ResumeCh:    ch.ResumeCh,
+		}
+		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
+
+	case *orchestrator.FreeChatOrchestrator:
+		config := &orchestrator.FreeChatConfig{
+			RoleIDs:     roleIDs,
+			Topic:       sess.Title,
+			MaxRounds:   sess.MaxRounds,
+			InterruptCh: ch.InterruptCh,
+			ResumeCh:    ch.ResumeCh,
+		}
+		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
+
+	default:
+		execErr = fmt.Errorf("不支持的编排器类型: %T", orch)
+	}
+
+	if execErr != nil {
 		_ = h.sessionService.Terminate(ctx, sessionID)
-		return fmt.Errorf("讨论执行失败: %w", err)
+		return fmt.Errorf("讨论执行失败: %w", execErr)
 	}
 
 	// 讨论正常结束，更新状态
 	_ = h.sessionService.Terminate(ctx, sessionID)
 	return nil
+}
+
+// PauseRequest 暂停请求体
+type PauseRequest struct {
+	NodeName string `json:"node_name"`
+	Message  string `json:"message"`
+}
+
+// ResumeRequest 恢复请求体
+type ResumeRequest struct {
+	Message string `json:"message"`
 }
 
 // Pause 暂停会话
@@ -189,7 +237,13 @@ func (h *SessionHandler) Pause(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.sessionService.Pause(r.Context(), id); err != nil {
+	var req PauseRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		middleware.WriteBadRequest(w, "无效的请求体")
+		return
+	}
+
+	if err := h.sessionService.Pause(r.Context(), id, req.NodeName, req.Message); err != nil {
 		middleware.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -206,7 +260,13 @@ func (h *SessionHandler) Resume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.sessionService.Resume(r.Context(), id); err != nil {
+	var req ResumeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		middleware.WriteBadRequest(w, "无效的请求体")
+		return
+	}
+
+	if err := h.sessionService.Resume(r.Context(), id, req.Message); err != nil {
 		middleware.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
