@@ -1,0 +1,4 @@
+/frontend/dist/
+/frontend/node_modules/
+/.github/
+/config/config.dev.yaml
