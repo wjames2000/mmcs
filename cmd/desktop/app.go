@@ -456,20 +456,49 @@ func (a *App) startOrchestration(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("创建编排器失败: %w", err)
 	}
 
-	// 提取角色 ID 和主持人模型绑定
+	// 提取角色 ID 和主持人配置
 	roleIDs := make([]string, len(sessionRoles))
 	var moderatorModelBinding string
+	moderatorRoleID := ""
+	moderatorRoleIndex := 0
+	if sess.Config != nil {
+		var cfg struct {
+			ModeratorRoleID string `json:"moderator_role_id"`
+		}
+		if err := json.Unmarshal(sess.Config, &cfg); err == nil {
+			moderatorRoleID = cfg.ModeratorRoleID
+		}
+	}
 	for i, sr := range sessionRoles {
 		roleIDs[i] = sr.RoleID
-		// 第一个角色是主持人，提取其模型绑定
-		if i == 0 && sr.ModelOverride != nil {
-			var override struct {
-				Provider  string `json:"provider"`
-				ModelName string `json:"model_name"`
+
+		if sr.ModelOverride == nil {
+			if sr.RoleID == moderatorRoleID {
+				moderatorRoleIndex = i
 			}
-			if err := json.Unmarshal(sr.ModelOverride, &override); err == nil && override.Provider != "" {
+			continue
+		}
+
+		var override struct {
+			Provider    string `json:"provider"`
+			ModelName   string `json:"model_name"`
+			IsModerator bool   `json:"is_moderator"`
+		}
+		if err := json.Unmarshal(sr.ModelOverride, &override); err != nil {
+			continue
+		}
+
+		// 检测是否标记为主持人
+		if override.IsModerator || sr.RoleID == moderatorRoleID {
+			moderatorRoleIndex = i
+			if override.Provider != "" {
 				moderatorModelBinding = override.Provider
 			}
+		}
+
+		// 兼容旧逻辑：未指定主持人时，第一个角色作为主持人
+		if moderatorRoleID == "" && i == 0 && override.Provider != "" && moderatorModelBinding == "" {
+			moderatorModelBinding = override.Provider
 		}
 	}
 
@@ -498,6 +527,7 @@ func (a *App) startOrchestration(ctx context.Context, sessionID string) error {
 			Topic:                 topic,
 			MaxRounds:             sess.MaxRounds,
 			ModeratorModelBinding: moderatorModelBinding,
+			ModeratorRoleIndex:    moderatorRoleIndex,
 			InterruptCh:           ch.InterruptCh,
 			ResumeCh:              ch.ResumeCh,
 			MsgStore:              a.messageStore,

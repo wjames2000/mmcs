@@ -368,23 +368,41 @@ type ExpertSpeakResult struct {
 // roles: 角色上下文列表
 // topic: 当前讨论话题
 // history: 历史消息
+//
+// 并发安全：每个角色在独立 goroutine 中执行，内部使用锁保护 results 写入。
+// 超时安全：模型调用有 30s 单个超时，整体执行有 60s 兜底超时。
 func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, topic string, state *DiscussionState) []*ExpertSpeakResult {
 	results := make([]*ExpertSpeakResult, len(roles))
 	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	// 为模型调用设置总超时（防止单个角色卡住整个讨论）
+	modelCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 
 	for i, rc := range roles {
 		wg.Add(1)
 		go func(idx int, rctx *RoleContext) {
 			defer wg.Done()
 
-			// 根据轮次构建消息（第 1 轮发完整历史，第 2 轮+ 用精简上下文）
+			defer func() {
+				if r := recover(); r != nil {
+					mu.Lock()
+					results[idx] = &ExpertSpeakResult{
+						RoleName: rctx.Role.Name,
+						Content:  fmt.Sprintf("发言异常: %v", r),
+						Error:    fmt.Errorf("panic: %v", r),
+					}
+					mu.Unlock()
+				}
+			}()
+
 			currentRound := state.GetCurrentRound()
 			messages := []model_gateway.ChatMessage{
 				{Role: "system", Content: rctx.Prompt},
 			}
 
 			if currentRound <= 1 {
-				// 第 1 轮：发送完整历史（此时历史很短）
 				history := state.GetHistory()
 				for _, msg := range history {
 					messages = append(messages, *msg)
@@ -393,36 +411,27 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 					messages = append(messages, model_gateway.ChatMessage{Role: "user", Content: topic})
 				}
 			} else {
-				// 第 2 轮+：精简上下文，避免 token 浪费
-				// 发送原始话题
 				if topic != "" {
 					messages = append(messages, model_gateway.ChatMessage{Role: "user", Content: topic})
 				}
-
-				// 添加该角色上一轮自己的发言摘要
 				if lastMsg := state.GetRoleLastMessage(rctx.Role.Name); lastMsg != "" {
 					messages = append(messages, model_gateway.ChatMessage{
 						Role:    "assistant",
 						Content: fmt.Sprintf("你上一轮的发言摘要：%s", truncateContent(lastMsg, 200)),
 					})
 				}
-
-				// 添加上一轮主持人总结（包含所有角色核心观点）
 				if state.LastRoundSummary != "" {
 					messages = append(messages, model_gateway.ChatMessage{
 						Role:    "user",
 						Content: state.LastRoundSummary,
 					})
 				}
-
-				// 去重提示
 				messages = append(messages, model_gateway.ChatMessage{
 					Role:    "user",
 					Content: "请不要重复之前已经表达过的观点，本轮请重点回应其他专家的看法或提出新的见解。",
 				})
 			}
 
-			// 推送节点开始事件
 			if state.Bridge != nil {
 				_ = state.Bridge.Push(&stream.GraphEvent{
 					Type:      "node_start",
@@ -432,38 +441,55 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 				})
 			}
 
-			// 检查 ChatModel 是否可用，不可用则使用模拟发言
 			var content string
 			var tokens int
-			var genErr error
+			var execErr error
 
 			if rctx.ChatModel == nil {
-				// 模拟模式：生成模拟发言，添加延迟让讨论有真实感
 				content = generateSimulatedOpinion(rctx.Role, topic, state.GetCurrentRound(), state.GetHistory())
 				tokens = len(content) / 4
 				select {
 				case <-time.After(300 * time.Millisecond):
-				case <-ctx.Done():
-					results[idx] = &ExpertSpeakResult{
-						RoleName: rctx.Role.Name,
-						Error:    ctx.Err(),
-					}
+				case <-modelCtx.Done():
+					mu.Lock()
+					results[idx] = &ExpertSpeakResult{RoleName: rctx.Role.Name, Error: modelCtx.Err()}
+					mu.Unlock()
 					return
 				}
 			} else {
-				// 真实模型模式
-				var resp *model_gateway.ChatResponse
-				resp, genErr = rctx.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
-					Messages: messages,
-				})
-				if genErr != nil {
-					log.Error().Err(genErr).Str("role", rctx.Role.Name).Msg("专家发言失败")
-					// 回退到模拟发言
+				// 真实模型：用 goroutine+channel 强制超时（防止 Generate 忽略 context）
+				type genResult struct {
+					resp *model_gateway.ChatResponse
+					err  error
+				}
+				done := make(chan genResult, 1)
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							done <- genResult{err: fmt.Errorf("模型调用panic: %v", r)}
+						}
+					}()
+					resp, err := rctx.ChatModel.Generate(modelCtx, &model_gateway.ChatRequest{
+						Messages: messages,
+					})
+					done <- genResult{resp: resp, err: err}
+				}()
+
+				select {
+				case gr := <-done:
+					if gr.err != nil {
+						log.Error().Err(gr.err).Str("role", rctx.Role.Name).Msg("专家发言失败")
+						content = generateSimulatedOpinion(rctx.Role, topic, state.GetCurrentRound(), state.GetHistory())
+						tokens = len(content) / 4
+						execErr = gr.err
+					} else {
+						content = gr.resp.Content
+						tokens = gr.resp.TotalTokens
+					}
+				case <-modelCtx.Done():
+					log.Warn().Str("role", rctx.Role.Name).Msg("模型调用超时，回退到模拟发言")
 					content = generateSimulatedOpinion(rctx.Role, topic, state.GetCurrentRound(), state.GetHistory())
 					tokens = len(content) / 4
-				} else {
-					content = resp.Content
-					tokens = resp.TotalTokens
 				}
 			}
 
@@ -471,7 +497,7 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 				RoleName: rctx.Role.Name,
 				Content:  content,
 				Tokens:   tokens,
-				Error:    genErr,
+				Error:    execErr,
 			}
 
 			// 记录该角色本轮发言（供下一轮精简上下文使用）
@@ -509,7 +535,45 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 		}(i, rc)
 	}
 
-	wg.Wait()
+	// 整体执行超时兜底：如果任何 goroutine 卡住，最多等待 60 秒
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// 所有 goroutine 正常完成
+	case <-time.After(60 * time.Second):
+		log.Error().Int("roles", len(roles)).Msg("ExpertSpeakNode.Execute 整体超时")
+		// 填充未完成的结果为错误
+		mu.Lock()
+		for i, r := range results {
+			if r == nil {
+				results[i] = &ExpertSpeakResult{
+					RoleName: roles[i].Role.Name,
+					Content:  "发言超时",
+					Error:    fmt.Errorf("整体执行超时"),
+				}
+			}
+		}
+		mu.Unlock()
+	case <-ctx.Done():
+		log.Warn().Err(ctx.Err()).Msg("ExpertSpeakNode.Execute 上下文取消")
+		mu.Lock()
+		for i, r := range results {
+			if r == nil {
+				results[i] = &ExpertSpeakResult{
+					RoleName: roles[i].Role.Name,
+					Content:  "发言取消",
+					Error:    ctx.Err(),
+				}
+			}
+		}
+		mu.Unlock()
+	}
+
 	return results
 }
 

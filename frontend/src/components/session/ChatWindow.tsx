@@ -31,15 +31,20 @@ export default function ChatWindow({ messages, activeSpeaker, isStreaming }: Pro
   // Group round indicators
   const renderMessages = () => {
     const elements: React.ReactNode[] = []
-    let lastRound = -1
 
     messages.forEach((msg, idx) => {
       if (msg.type === 'round.start' || msg.type === 'node_start') {
+        // 从 node_name 提取轮次号，如 "round_3"
+        const roundMatch = msg.node_name?.match(/round_(\d+)/)
+        const roundNum = roundMatch ? parseInt(roundMatch[1]) : ''
+        const label = roundNum
+          ? `第 ${roundNum} 轮讨论开始`
+          : (msg.content || '讨论阶段开始')
         elements.push(
           <div key={`round-${idx}`} className="flex items-center gap-3 my-4">
             <div className="flex-1 h-px bg-gray-200" />
-            <span className="text-xs text-gray-400 font-medium px-2">
-              {msg.content || '第 N 轮开始'}
+            <span className="text-xs text-gray-400 font-medium px-2 whitespace-nowrap">
+              {label}
             </span>
             <div className="flex-1 h-px bg-gray-200" />
           </div>
@@ -58,7 +63,7 @@ export default function ChatWindow({ messages, activeSpeaker, isStreaming }: Pro
       }
 
       // Only render message/speak type events
-      if (msg.type === 'message' || msg.type === 'role.speak' || msg.type === 'role.done') {
+      if (msg.type === 'message' || msg.type === 'role.speak' || msg.type === 'role.done' || msg.type === 'moderator_speech') {
         elements.push(
           <MessageBubble
             key={`msg-${idx}`}

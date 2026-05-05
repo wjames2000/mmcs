@@ -61,6 +61,7 @@ func (f *Factory) createRoundRobin() *RoundRobinOrchestrator {
 		expertSpeakNode,
 		moderatorEvalNode,
 		summarizeNode,
+		f.gateway,
 	)
 }
 

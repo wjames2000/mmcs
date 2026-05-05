@@ -32,6 +32,7 @@ export default function CreateSessionDialog({ open, onClose, onSubmit }: Props) 
   // 模型相关状态
   const [modelProviders, setModelProviders] = useState<ModelProvider[]>([])
   const [roleModels, setRoleModels] = useState<Record<string, { provider: string; modelName: string }>>({})
+  const [moderatorRoleId, setModeratorRoleId] = useState<string>('')
 
   // 角色默认模型映射
   const getDefaultModel = useCallback((role: Role): { provider: string; modelName: string } => {
@@ -115,16 +116,18 @@ export default function CreateSessionDialog({ open, onClose, onSubmit }: Props) 
     setSubmitting(true)
     setError('')
     try {
-      // 构建 roleBindings
+      // 构建 roleBindings，标记主持人
       const roleBindings: RoleBinding[] = selectedRoleIds.map(roleId => {
         const modelInfo = roleModels[roleId]
+        const binding: RoleBinding = { role_id: roleId }
         if (modelInfo && modelInfo.provider && modelInfo.modelName) {
-          return {
-            role_id: roleId,
-            model_override: { provider: modelInfo.provider, model_name: modelInfo.modelName },
-          }
+          binding.model_override = { provider: modelInfo.provider, model_name: modelInfo.modelName }
         }
-        return { role_id: roleId }
+        // 将主持人信息编码到第一个 role_binding 的 model_override 中
+        if (roleId === moderatorRoleId && binding.model_override) {
+          (binding.model_override as any).is_moderator = true
+        }
+        return binding
       })
 
       await onSubmit(title.trim(), paradigm, maxRounds, selectedRoleIds, roleBindings, topic.trim())
@@ -249,6 +252,22 @@ export default function CreateSessionDialog({ open, onClose, onSubmit }: Props) 
                             value={roleModels[role.id] || { provider: '', modelName: '' }}
                             onChange={updateRoleModel}
                           />
+                        </div>
+                      )}
+                      {/* 主持人选择 */}
+                      {isSelected && (
+                        <div className="ml-8 mt-1 mb-2">
+                          <button
+                            type="button"
+                            onClick={() => setModeratorRoleId(moderatorRoleId === role.id ? '' : role.id)}
+                            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                              moderatorRoleId === role.id
+                                ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+                                : 'bg-gray-50 text-gray-500 border border-gray-200 hover:border-gray-300'
+                            }`}
+                          >
+                            🎤 {moderatorRoleId === role.id ? '主持人' : '设为主持人'}
+                          </button>
                         </div>
                       )}
                     </div>

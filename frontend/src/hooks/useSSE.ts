@@ -13,8 +13,10 @@ interface UseSSEResult {
 
 /**
  * SSE Hook — 双模式支持
- * Wails 桌面模式使用 runtime.EventsOn
+ * Wails 桌面模式使用定时轮询 MessageStore（绕过 runtime.EventsOn 的 unreliability）
  * Web 浏览器模式使用 EventSource
+ *
+ * Wails 环境检测：优先使用 go.main.App（与 api.ts 一致），降级使用 runtime.EventsOn
  */
 export function useSSE(sessionId: string | null): UseSSEResult {
   const [messages, setMessages] = useState<StreamMessage[]>([])
@@ -22,11 +24,13 @@ export function useSSE(sessionId: string | null): UseSSEResult {
   const [isConnected, setIsConnected] = useState(false)
   const [currentRound, setCurrentRound] = useState(0)
   const eventSourceRef = useRef<EventSource | null>(null)
-  const unlistenRef = useRef<(() => void) | null>(null)
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastMsgIdRef = useRef(0)
 
   const clearMessages = useCallback(() => {
     setMessages([])
     setCurrentRound(0)
+    lastMsgIdRef.current = 0
   }, [])
 
   const addMessage = useCallback((msg: StreamMessage) => {
@@ -50,27 +54,14 @@ export function useSSE(sessionId: string | null): UseSSEResult {
 
     switch (eventType) {
       case 'round.start':
-        // 从 node_name 提取轮次号，如 "round_3"
         const roundMatch = payload?.node_name?.match(/round_(\d+)/)
-        if (roundMatch) {
-          setCurrentRound(parseInt(roundMatch[1]))
-        }
+        if (roundMatch) setCurrentRound(parseInt(roundMatch[1]))
         break
-      case 'session.starting':
-        setStatus('starting')
-        break
-      case 'session.paused':
-        setStatus('paused')
-        break
-      case 'session.resumed':
-        setStatus('running')
-        break
-      case 'session.ended':
-        setStatus('ended')
-        break
-      case 'error':
-        setStatus('error')
-        break
+      case 'session.starting': setStatus('starting'); break
+      case 'session.paused': setStatus('paused'); break
+      case 'session.resumed': setStatus('running'); break
+      case 'session.ended': setStatus('ended'); break
+      case 'error': setStatus('error'); break
     }
 
     setMessages(prev => [...prev, message])
@@ -84,22 +75,64 @@ export function useSSE(sessionId: string | null): UseSSEResult {
       return
     }
 
-    const isWailsEnv = typeof window !== 'undefined' && !!(window as any).runtime?.EventsOn
+    // Wails 环境检测：一致使用 go.main.App（与 api.ts 对齐）
+    const isWailsEnv = typeof window !== 'undefined' && !!(window as any).go?.main?.App
 
     if (isWailsEnv) {
-      // Wails 桌面模式：使用 runtime.EventsOn
-      const eventName = `session:${sessionId}`
-      const unlisten = (window as any).runtime.EventsOn(eventName, (eventData: any) => {
-        handleEvent(eventData)
-      })
-      unlistenRef.current = unlisten
+      // Wails 桌面模式：轮询 MessageStore（每 1.5 秒），绕过 runtime.EventsOn 的不可靠性
       setIsConnected(true)
 
-      return () => {
-        if (unlistenRef.current) {
-          unlistenRef.current()
-          unlistenRef.current = null
+      const pollFn = async () => {
+        try {
+          const allMsgs = await (window as any).go?.main?.App?.GetSessionMessages(sessionId)
+          if (!Array.isArray(allMsgs)) {
+            // allMsgs 不是数组（可能是 undefined/null），不清空已有消息
+            return
+          }
+
+          // 全量替换消息（包括空数组时的清空）
+          setMessages(() => {
+            return allMsgs.map((m: any) => ({
+              type: 'role.speak' as const,
+              role_name: m.role_name || m.RoleName || '',
+              content: m.content || m.Content || '',
+              timestamp: m.created_at || m.CreatedAt || m.timestamp || new Date().toISOString(),
+            }))
+          })
+          if (allMsgs.length > 0) {
+            setCurrentRound(prev => {
+              const maxRound = Math.max(...allMsgs.map((m: any) => m.round || m.Round || 0), prev)
+              return maxRound || prev
+            })
+          }
+        } catch {
+          // silently ignore poll errors
         }
+      }
+
+      // 首次立即执行 + 定时轮询
+      pollFn()
+      pollTimerRef.current = setInterval(pollFn, 1500)
+
+      // 尝试额外监听 runtime.EventsOn（双通道冗余，副通道）
+      let unlisten: (() => void) | null = null
+      try {
+        if ((window as any).runtime?.EventsOn) {
+          const eventName = `session:${sessionId}`
+          unlisten = (window as any).runtime.EventsOn(eventName, (eventData: any) => {
+            handleEvent(eventData)
+          })
+        }
+      } catch {
+        // EventsOn 不可用不影响功能（轮询是主通道）
+      }
+
+      return () => {
+        if (pollTimerRef.current) {
+          clearInterval(pollTimerRef.current)
+          pollTimerRef.current = null
+        }
+        if (unlisten) unlisten()
         setIsConnected(false)
       }
     }
@@ -108,49 +141,18 @@ export function useSSE(sessionId: string | null): UseSSEResult {
     const es = new EventSource(`http://localhost:8080/api/v1/sessions/${sessionId}/stream`)
     eventSourceRef.current = es
 
-    es.addEventListener('connected', () => {
-      setIsConnected(true)
-    })
+    es.addEventListener('connected', () => setIsConnected(true))
 
-    es.addEventListener('round.start', (e) => {
-      handleEvent({ ...JSON.parse(e.data), type: 'round.start' })
-    })
-
-    es.addEventListener('role.speak', (e) => {
-      handleEvent({ ...JSON.parse(e.data), type: 'role.speak' })
-    })
-
-    es.addEventListener('role.done', (e) => {
-      handleEvent({ ...JSON.parse(e.data), type: 'role.done' })
-    })
-
-    es.addEventListener('round.eval', (e) => {
-      handleEvent({ ...JSON.parse(e.data), type: 'round.eval' })
-    })
-
-    es.addEventListener('session.paused', (e) => {
-      setStatus('paused')
-      handleEvent({ ...JSON.parse(e.data), type: 'session.paused' })
-    })
-
-    es.addEventListener('session.resumed', (e) => {
-      setStatus('running')
-      handleEvent({ ...JSON.parse(e.data), type: 'session.resumed' })
-    })
-
-    es.addEventListener('session.ended', (e) => {
-      setStatus('ended')
-      handleEvent({ ...JSON.parse(e.data), type: 'session.ended' })
+    const eventTypes = ['round.start', 'role.speak', 'role.done', 'round.eval', 'session.paused', 'session.resumed', 'session.ended']
+    eventTypes.forEach(et => {
+      es.addEventListener(et, (e) => handleEvent({ ...JSON.parse(e.data), type: et } as any))
     })
 
     es.addEventListener('error', () => {
-      console.error('SSE connection error')
       handleEvent({ type: 'error', error: 'SSE 连接错误', timestamp: new Date().toISOString() })
     })
 
-    es.onerror = () => {
-      setIsConnected(false)
-    }
+    es.onerror = () => setIsConnected(false)
 
     return () => {
       es.close()

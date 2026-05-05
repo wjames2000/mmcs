@@ -2,3 +2,5 @@
 /frontend/node_modules/
 /.github/
 /config/config.dev.yaml
+/cmd/desktop/build/
+/cmd/desktop/frontend/

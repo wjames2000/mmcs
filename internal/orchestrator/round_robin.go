@@ -18,9 +18,11 @@ type RoundRobinConfig struct {
 	CustomPrompt string   // 用户自定义额外提示
 	MaxRounds    int
 
-	// ModeratorModelBinding 主持人模型绑定（可选）
-	// 格式如 "openai" 或 "openai:gpt-4"
-	// 为空时使用默认模型
+	// ModeratorRoleIndex 主持人在 roleContexts 中的索引
+	// 默认 0（第一个角色），设为 -1 表示无主持人
+	ModeratorRoleIndex int
+
+	// ModeratorModelBinding 主持人模型绑定，如 "openai:gpt-4"
 	ModeratorModelBinding string
 
 	// InterruptCh 和 ResumeCh 用于支持人类介入（Pause/Resume）
@@ -86,13 +88,21 @@ func (r *RoundRobinOrchestrator) Execute(
 	}
 
 	// 应用主持人模型绑定
-	if config.ModeratorModelBinding != "" && len(roleContexts) > 0 && r.gateway != nil {
+	if config.ModeratorRoleIndex < 0 {
+		config.ModeratorRoleIndex = 0
+	}
+	modIndex := config.ModeratorRoleIndex
+	if modIndex >= len(roleContexts) {
+		modIndex = 0
+	}
+
+	if config.ModeratorModelBinding != "" && len(roleContexts) > modIndex && r.gateway != nil {
 		modModel, modErr := r.gateway.GetChatModel(config.ModeratorModelBinding)
 		if modErr != nil {
 			log.Warn().Err(modErr).Str("binding", config.ModeratorModelBinding).Msg("获取主持人模型失败，使用默认模型")
 		} else {
-			roleContexts[0].ChatModel = modModel
-			log.Info().Str("binding", config.ModeratorModelBinding).Str("role", roleContexts[0].Role.Name).Msg("主持人模型绑定成功")
+			roleContexts[modIndex].ChatModel = modModel
+			log.Info().Str("binding", config.ModeratorModelBinding).Str("role", roleContexts[modIndex].Role.Name).Msg("主持人模型绑定成功")
 		}
 	}
 
@@ -107,8 +117,8 @@ func (r *RoundRobinOrchestrator) Execute(
 	}
 
 	// 3. 主持人开场白
-	if len(roleContexts) > 0 {
-		moderatorRC := roleContexts[0] // 第一个角色作为主持人
+	if len(roleContexts) > modIndex {
+		moderatorRC := roleContexts[modIndex]
 		if progressCh != nil {
 			progressCh <- fmt.Sprintf("主持人 %s 开场发言...", moderatorRC.Role.Name)
 		}
@@ -231,7 +241,7 @@ func (r *RoundRobinOrchestrator) Execute(
 			_ = bridge.Push(&stream.GraphEvent{
 				Type:      "moderator_speech",
 				NodeName:  fmt.Sprintf("round_%d_eval", currentRound),
-				RoleName:  roleContexts[0].Role.Name,
+				RoleName:  roleContexts[modIndex].Role.Name,
 				Content:   evalContent,
 				Timestamp: time.Now(),
 			})

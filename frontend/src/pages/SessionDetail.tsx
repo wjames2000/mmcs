@@ -19,6 +19,7 @@ export default function SessionDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [sessionStatus, setSessionStatus] = useState('')
+  const [actionError, setActionError] = useState('') // 删除/归档等操作的错误通知
 
   // 角色管理状态
   const [showAddRole, setShowAddRole] = useState(false)
@@ -248,12 +249,12 @@ export default function SessionDetail() {
               </button>
               <button
                 onClick={async () => {
-                  if (!confirm('归档后仍可查看纪要，确定归档？')) return
                   try {
                     await api.archiveSession(session.id)
                     setSessionStatus('archived')
+                    setActionError('')
                   } catch (err: any) {
-                    alert(err.message || '归档失败')
+                    setActionError(err.message || '归档失败')
                   }
                 }}
                 className="px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 rounded-lg"
@@ -262,12 +263,11 @@ export default function SessionDetail() {
               </button>
               <button
                 onClick={async () => {
-                  if (!confirm('确定要永久删除此会话？此操作不可撤销。')) return
                   try {
                     await api.deleteSession(session.id)
                     navigate(`/workspaces/${session.workspace_id}`)
                   } catch (err: any) {
-                    alert(err.message || '删除失败')
+                    setActionError(err.message || '删除失败')
                   }
                 }}
                 className="px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 rounded-lg"
@@ -278,6 +278,14 @@ export default function SessionDetail() {
           )}
         </div>
       </div>
+
+      {/* 操作错误通知 */}
+      {actionError && (
+        <div className="shrink-0 mb-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError('')} className="text-red-400 hover:text-red-600 ml-2">&times;</button>
+        </div>
+      )}
 
       {/* Main content: chat + participants sidebar */}
       <div className="flex-1 flex gap-4 min-h-0">
