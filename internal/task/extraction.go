@@ -49,7 +49,7 @@ func ExtractFromMinutes(mm *minutes.MeetingMinutes) ([]*Task, error) {
 
 	// 从 Conclusion 中提取关键行动项（当没有 Decisions 时）
 	if len(tasks) == 0 && mm.Conclusion != "" {
-		items := extractActionItems(mm.Conclusion)
+		items := ExtractActionItems(mm.Conclusion)
 		for _, item := range items {
 			task := &Task{
 				Title:              item,
@@ -70,19 +70,19 @@ func ExtractFromMinutes(mm *minutes.MeetingMinutes) ([]*Task, error) {
 	return tasks, nil
 }
 
-// extractActionItems 从结论文本中提取关键行动项
+// ExtractActionItems 从结论文本中提取关键行动项
 // 基于简单的启发式规则：按句号/换行分割，过滤包含行动关键词的句子
-func extractActionItems(conclusion string) []string {
-	if conclusion == "" {
+func ExtractActionItems(text string) []string {
+	if text == "" {
 		return nil
 	}
 
 	// 按换行分割
-	lines := strings.Split(conclusion, "\n")
+	lines := strings.Split(text, "\n")
 
 	// 也按句号分割
 	if len(lines) <= 1 {
-		lines = strings.Split(conclusion, "。")
+		lines = strings.Split(text, "。")
 	}
 
 	var items []string
@@ -113,9 +113,9 @@ func extractActionItems(conclusion string) []string {
 		}
 	}
 
-	// 如果没有任何匹配关键词的句子，将整个结论作为一个行动项
+	// 如果没有任何匹配关键词的句子，将整个文本作为一个行动项
 	if len(items) == 0 {
-		items = append(items, conclusion)
+		items = append(items, text)
 	}
 
 	return items

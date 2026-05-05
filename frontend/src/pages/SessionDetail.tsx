@@ -30,6 +30,10 @@ export default function SessionDetail() {
   const [newRoleModel, setNewRoleModel] = useState<string>('')
 
   const { messages, status: sseStatus, isConnected, currentRound, clearMessages, setMessages } = useSSE(sessionId || null)
+  const [fontSize, setFontSize] = useState(14)
+  const [tasks, setTasks] = useState<any[]>([])
+  const [tasksLoading, setTasksLoading] = useState(false)
+  const [showTasks, setShowTasks] = useState(false)
 
   // Sync SSE status changes to sessionStatus
   useEffect(() => {
@@ -37,6 +41,17 @@ export default function SessionDetail() {
       setSessionStatus(sseStatus)
     }
   }, [sseStatus])
+
+  // 自动提取任务清单
+  useEffect(() => {
+    if (sessionStatus === 'ended' && sessionId && !showTasks && !tasksLoading) {
+      setTasksLoading(true)
+      api.getSessionTasks(sessionId).then(data => {
+        setTasks(data || [])
+        if (data && data.length > 0) setShowTasks(true)
+      }).catch(() => {}).finally(() => setTasksLoading(false))
+    }
+  }, [sessionStatus, sessionId])
 
   // 材料管理
   const [materials, setMaterials] = useState<Material[]>([])
@@ -235,6 +250,18 @@ export default function SessionDetail() {
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 text-xs text-gray-400">
+            <span className="text-[10px]">A</span>
+            <input
+              type="range"
+              min="12"
+              max="20"
+              value={fontSize}
+              onChange={e => setFontSize(Number(e.target.value))}
+              className="w-16 h-1 accent-blue-500"
+            />
+            <span className="text-sm">A</span>
+          </div>
           <SessionControls
             sessionId={session.id}
             status={sessionStatus}
@@ -310,6 +337,7 @@ export default function SessionDetail() {
             messages={messages}
             activeSpeaker={activeSpeaker}
             isStreaming={isStreaming}
+            fontSize={fontSize}
           />
 
           {/* Interrupt input (only when paused) */}
@@ -424,8 +452,42 @@ export default function SessionDetail() {
             onMaterialsChange={setMaterials}
           />
         </div>
+      </div>
 
-        {/* 添加角色弹窗 */}
+      {/* 任务清单 */}
+      {showTasks && tasks.length > 0 && (
+        <div className="mt-4 bg-white rounded-xl border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-900">📋 任务清单</h3>
+            <button
+              onClick={() => setShowTasks(false)}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              收起
+            </button>
+          </div>
+          <div className="space-y-2">
+            {tasks.map((task, idx) => (
+              <div key={idx} className="flex items-start gap-3 px-3 py-2 bg-gray-50 rounded-lg">
+                <input type="checkbox" className="mt-0.5 text-blue-600 rounded" />
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-800">{task.title || task.description}</p>
+                  {task.role && (
+                    <p className="text-xs text-gray-400 mt-0.5">关联角色：{task.role}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {tasksLoading && (
+        <div className="mt-4 bg-white rounded-xl border border-gray-200 p-4">
+          <p className="text-sm text-gray-400 animate-pulse">正在提取任务清单...</p>
+        </div>
+      )}
+
+      {/* 添加角色弹窗 */}
         {showAddRole && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowAddRole(false)}>
             <div
@@ -523,11 +585,10 @@ export default function SessionDetail() {
                 >
                   添加
                 </button>
-              </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* 重启会议弹窗 */}
       {showRestartDialog && session && (

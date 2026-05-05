@@ -6,9 +6,10 @@ interface Props {
   content: string
   timestamp: string
   isStreaming: boolean
+  fontSize?: number
 }
 
-export default function MessageBubble({ roleName, content, timestamp, isStreaming }: Props) {
+export default function MessageBubble({ roleName, content, timestamp, isStreaming, fontSize }: Props) {
   const isUser = roleName === 'user' || roleName === ''
 
   if (isUser) {
@@ -54,8 +55,8 @@ export default function MessageBubble({ roleName, content, timestamp, isStreamin
             {new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </span>
         </div>
-        <div className={`text-sm text-gray-800 ${isStreaming ? 'speaking-cursor' : ''}`}>
-          <Markdown content={content} />
+        <div className={`${isStreaming ? 'speaking-cursor' : ''}`}>
+          <Markdown content={content} fontSize={fontSize} />
         </div>
       </div>
     </div>

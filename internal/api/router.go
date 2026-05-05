@@ -37,6 +37,7 @@ type Dependencies struct {
 	MetricsHandler      MetricsHandler
 	MaterialStore       *session.MaterialStore
 	ModelGateway        *model_gateway.Gateway
+	SessionMessageStore *session.MessageStore
 }
 
 // NewRouter 创建并注册所有路由
@@ -49,7 +50,7 @@ func NewRouter(deps *Dependencies) http.Handler {
 	authHandler := NewAuthHandler(deps.UserService)
 	workspaceHandler := NewWorkspaceHandler(deps.WorkspaceService, deps.TaskService)
 	roleHandler := NewRoleHandler(deps.RoleService)
-	sessionHandler := NewSessionHandler(deps.SessionService, deps.OrchestratorFactory, deps.HubRegistry, deps.MaterialStore)
+	sessionHandler := NewSessionHandler(deps.SessionService, deps.OrchestratorFactory, deps.HubRegistry, deps.MaterialStore, deps.SessionMessageStore)
 	agentHandler := NewAgentHandler(deps.AgentExecutor)
 	taskHandler := NewTaskHandler(deps.TaskService, deps.SessionService)
 
@@ -105,6 +106,9 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.Handle("GET /api/v1/sessions/{id}/minutes", rl.Limit(middleware.PanicRecovery(sessionAuth(http.HandlerFunc(sessionHandler.GetMinutes)))))
 	mux.Handle("POST /api/v1/sessions/restart", rl.Limit(middleware.PanicRecovery(sessionAuth(http.HandlerFunc(sessionHandler.Restart)))))
 	mux.Handle("GET /api/v1/sessions/{sessionId}/merged-minutes", rl.Limit(middleware.PanicRecovery(sessionAuth(http.HandlerFunc(sessionHandler.GetMergedMinutes)))))
+	mux.Handle("GET /api/v1/sessions/{sessionId}/messages", rl.Limit(middleware.PanicRecovery(sessionAuth(http.HandlerFunc(sessionHandler.ListMessages)))))
+	mux.Handle("DELETE /api/v1/sessions/{id}", rl.Limit(middleware.PanicRecovery(sessionAuth(http.HandlerFunc(sessionHandler.Delete)))))
+	mux.Handle("GET /api/v1/sessions/{sessionId}/tasks", rl.Limit(middleware.PanicRecovery(sessionAuth(http.HandlerFunc(sessionHandler.ExtractTasks)))))
 
 	// ===== 会议材料（需 JWT） =====
 	materialAuth := deps.AuthMiddleware.Authenticate

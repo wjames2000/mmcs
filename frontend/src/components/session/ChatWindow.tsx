@@ -7,9 +7,10 @@ interface Props {
   messages: StreamMessage[]
   activeSpeaker?: string
   isStreaming: boolean
+  fontSize?: number
 }
 
-export default function ChatWindow({ messages, activeSpeaker, isStreaming }: Props) {
+export default function ChatWindow({ messages, activeSpeaker, isStreaming, fontSize }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -71,6 +72,7 @@ export default function ChatWindow({ messages, activeSpeaker, isStreaming }: Pro
             content={msg.content || ''}
             timestamp={msg.timestamp}
             isStreaming={msg.type === 'role.speak' && isStreaming && msg.role_name === activeSpeaker}
+            fontSize={fontSize}
           />
         )
       }

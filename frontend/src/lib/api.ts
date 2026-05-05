@@ -329,6 +329,10 @@ export const api = {
     return httpCall<any[]>('GET', `/sessions/${sessionId}/messages`)
   },
 
+  getSessionTasks: async (sessionId: string) => {
+    return httpCall<any[]>('GET', `/sessions/${sessionId}/tasks`)
+  },
+
   // ---- Archive/Delete ----
   archiveSession: async (sessionId: string) => {
     if (isWails) return wailsCall<void>('ArchiveSession', sessionId)

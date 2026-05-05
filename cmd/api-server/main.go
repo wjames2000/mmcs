@@ -138,8 +138,9 @@ func main() {
 	})
 	log.Info().Msg("Provider 缓存初始化完成")
 
-	// 8. 会议材料存储
+	// 8. 会议材料存储 & 消息存储
 	materialStore := session.NewMaterialStore()
+	messageStore := session.NewMessageStore()
 
 	// 9. Graph 池 & 会话服务
 	graphPool := session.NewGraphPool(cfg.Session.GraphPoolSize)
@@ -176,6 +177,7 @@ func main() {
 		MetricsHandler:      mmcsmetrics.MetricsHandler(),
 		MaterialStore:       materialStore,
 		ModelGateway:        gateway,
+		SessionMessageStore: messageStore,
 	}
 	handler := api.NewRouter(deps)
 

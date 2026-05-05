@@ -14,6 +14,7 @@ import (
 	"github.com/wjames2000/mmcs/internal/orchestrator"
 	"github.com/wjames2000/mmcs/internal/session"
 	"github.com/wjames2000/mmcs/internal/stream"
+	"github.com/wjames2000/mmcs/internal/task"
 	"github.com/wjames2000/mmcs/internal/user"
 )
 
@@ -42,6 +43,7 @@ type SessionHandler struct {
 	orchestratorFactory *orchestrator.Factory
 	hubRegistry         *stream.HubRegistry
 	materialStore       *session.MaterialStore
+	messageStore        *session.MessageStore
 }
 
 // NewSessionHandler 创建会话 handler
@@ -50,12 +52,14 @@ func NewSessionHandler(
 	orchestratorFactory *orchestrator.Factory,
 	hubRegistry *stream.HubRegistry,
 	materialStore *session.MaterialStore,
+	messageStore *session.MessageStore,
 ) *SessionHandler {
 	return &SessionHandler{
 		sessionService:      sessionService,
 		orchestratorFactory: orchestratorFactory,
 		hubRegistry:         hubRegistry,
 		materialStore:       materialStore,
+		messageStore:        messageStore,
 	}
 }
 
@@ -238,6 +242,7 @@ func (h *SessionHandler) startOrchestration(ctx context.Context, sessionID strin
 			ModeratorPrompt: "",
 			InterruptCh:     ch.InterruptCh,
 			ResumeCh:        ch.ResumeCh,
+			MsgStore:        h.messageStore,
 		}
 		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
 
@@ -249,6 +254,7 @@ func (h *SessionHandler) startOrchestration(ctx context.Context, sessionID strin
 			AuthorRoleID: authorRoleID,
 			InterruptCh:  ch.InterruptCh,
 			ResumeCh:     ch.ResumeCh,
+			MsgStore:     h.messageStore,
 		}
 		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
 
@@ -258,6 +264,7 @@ func (h *SessionHandler) startOrchestration(ctx context.Context, sessionID strin
 			Topic:       topic,
 			InterruptCh: ch.InterruptCh,
 			ResumeCh:    ch.ResumeCh,
+			MsgStore:    h.messageStore,
 		}
 		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
 
@@ -268,6 +275,7 @@ func (h *SessionHandler) startOrchestration(ctx context.Context, sessionID strin
 			MaxRounds:   sess.MaxRounds,
 			InterruptCh: ch.InterruptCh,
 			ResumeCh:    ch.ResumeCh,
+			MsgStore:    h.messageStore,
 		}
 		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
 
@@ -277,15 +285,16 @@ func (h *SessionHandler) startOrchestration(ctx context.Context, sessionID strin
 
 	// 注意：progressCh 由编排器内部关闭，这里不再重复关闭
 
-	// 仅当执行出错时才终止会话（让用户手动终止正常完成的讨论）
+	// 讨论结束，自动终止会话
+	if err := h.sessionService.Terminate(ctx, sessionID); err != nil {
+		log.Warn().Err(err).Str("session_id", sessionID).Msg("终止会话失败")
+	}
+
 	if execErr != nil {
-		_ = h.sessionService.Terminate(ctx, sessionID)
 		return fmt.Errorf("讨论执行失败: %w", execErr)
 	}
 
-	// 讨论正常结束，不自动终止，保持 running 状态
-	// 用户可以通过 UI 手动点击"结束"来终止会话，期间可随时暂停/恢复
-	log.Debug().Str("session_id", sessionID).Msg("讨论执行完成，等待用户手动终止")
+	log.Info().Str("session_id", sessionID).Msg("讨论执行完成")
 	return nil
 }
 
@@ -595,4 +604,101 @@ func (h *SessionHandler) writeSSEEvent(w http.ResponseWriter, flusher http.Flush
 	}
 	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, string(data))
 	flusher.Flush()
+}
+
+// ListMessages 获取会话的历史消息
+// GET /api/v1/sessions/{sessionId}/messages
+func (h *SessionHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("sessionId")
+	if sessionID == "" {
+		middleware.WriteBadRequest(w, "缺少会话 ID")
+		return
+	}
+
+	if h.messageStore == nil {
+		middleware.WriteSuccess(w, []interface{}{})
+		return
+	}
+
+	msgs, err := h.messageStore.ListBySession(sessionID)
+	if err != nil {
+		middleware.WriteSuccess(w, []interface{}{})
+		return
+	}
+	middleware.WriteSuccess(w, msgs)
+}
+
+// Delete 删除会话
+// DELETE /api/v1/sessions/{id}
+func (h *SessionHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		middleware.WriteBadRequest(w, "缺少会话 ID")
+		return
+	}
+
+	if err := h.sessionService.Delete(r.Context(), id); err != nil {
+		middleware.WriteError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ExtractTasks 从会话消息中提取任务清单
+// GET /api/v1/sessions/{sessionId}/tasks
+func (h *SessionHandler) ExtractTasks(w http.ResponseWriter, r *http.Request) {
+	sessionID := r.PathValue("sessionId")
+	if sessionID == "" {
+		middleware.WriteBadRequest(w, "缺少会话 ID")
+		return
+	}
+
+	if h.messageStore == nil {
+		middleware.WriteSuccess(w, []map[string]interface{}{})
+		return
+	}
+
+	msgs, err := h.messageStore.ListBySession(sessionID)
+	if err != nil || len(msgs) == 0 {
+		middleware.WriteSuccess(w, []map[string]interface{}{})
+		return
+	}
+
+	// 合并所有消息内容
+	var b strings.Builder
+	for _, m := range msgs {
+		b.WriteString(fmt.Sprintf("- %s: %s\n", m.RoleName, m.Content))
+	}
+	text := b.String()
+
+	// 使用关键字提取行动项
+	actionItems := task.ExtractActionItems(text)
+	type taskItem struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Role        string `json:"role"`
+	}
+	result := make([]taskItem, 0, len(actionItems))
+	for _, item := range actionItems {
+		// 尝试从行动项文本中提取角色名
+		role := ""
+		for _, m := range msgs {
+			if strings.Contains(item, m.RoleName) {
+				role = m.RoleName
+				break
+			}
+		}
+		result = append(result, taskItem{
+			Title:       item,
+			Description: item,
+			Role:        role,
+		})
+	}
+
+	if result == nil {
+		result = []taskItem{}
+	}
+
+	middleware.WriteSuccess(w, result)
 }
