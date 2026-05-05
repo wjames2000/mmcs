@@ -29,7 +29,14 @@ export default function SessionDetail() {
   const [newRoleProvider, setNewRoleProvider] = useState<string>('')
   const [newRoleModel, setNewRoleModel] = useState<string>('')
 
-  const { messages, isConnected, currentRound, clearMessages, setMessages } = useSSE(sessionId || null)
+  const { messages, status: sseStatus, isConnected, currentRound, clearMessages, setMessages } = useSSE(sessionId || null)
+
+  // Sync SSE status changes to sessionStatus
+  useEffect(() => {
+    if (sseStatus === 'ended' || sseStatus === 'paused' || sseStatus === 'running') {
+      setSessionStatus(sseStatus)
+    }
+  }, [sseStatus])
 
   // 材料管理
   const [materials, setMaterials] = useState<Material[]>([])

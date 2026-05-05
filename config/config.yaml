@@ -47,7 +47,7 @@ context:
 
 auth:
   jwt_secret: "${JWT_SECRET}"
-  jwt_expiry: "15m"
+  jwt_expiry: "24h"
 
 crypto:
   master_key: "${CRYPTO_MASTER_KEY}"

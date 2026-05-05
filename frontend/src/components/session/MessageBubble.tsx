@@ -1,4 +1,5 @@
 import { getRoleColor, getRoleBorderStyle, USER_COLOR } from '../../styles/colors'
+import Markdown from '../shared/Markdown'
 
 interface Props {
   roleName: string
@@ -53,9 +54,9 @@ export default function MessageBubble({ roleName, content, timestamp, isStreamin
             {new Date(timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </span>
         </div>
-        <p className={`text-sm text-gray-800 whitespace-pre-wrap break-words ${isStreaming ? 'speaking-cursor' : ''}`}>
-          {content}
-        </p>
+        <div className={`text-sm text-gray-800 ${isStreaming ? 'speaking-cursor' : ''}`}>
+          <Markdown content={content} />
+        </div>
       </div>
     </div>
   )

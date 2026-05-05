@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { api } from '../../lib/api'
 import type { ModelProvider, CreateModelProviderReq } from '../../types'
 
 interface Props {
@@ -55,12 +56,7 @@ export default function ModelFormDialog({ open, editItem, onClose, onSubmit }: P
     setRefreshing(true)
     setError('')
     try {
-      const models = await (window as any).go?.main?.App?.RefreshModelsFromProvider
-        ? (window as any).go.main.App.RefreshModelsFromProvider(name || provider)
-        : fetch(`${baseUrl.replace(/\/$/, '')}/models`, {
-            headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-          }).then(r => r.json()).then(r => (r.data || []).map((m: any) => m.id || m))
-
+      const models = await api.refreshModelsFromProvider(name || provider)
       const list = Array.isArray(models) ? models : []
       setAvailableModels(list)
       if (list.length > 0 && !defaultModel) {
