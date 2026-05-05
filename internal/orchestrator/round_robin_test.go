@@ -278,7 +278,8 @@ func TestSummarizeNode_GenerateSummary(t *testing.T) {
 
 	assert.Equal(t, "s_summary", minutes.SessionID)
 	assert.Equal(t, 3, minutes.TotalMessages)
-	assert.Equal(t, "本次讨论共 1 轮，2 位专家参与", minutes.Summary)
+	assert.Contains(t, minutes.Summary, "本次讨论共 1 轮，2 位专家参与")
+	assert.Contains(t, minutes.Summary, "各角色核心观点")
 	assert.False(t, minutes.CompletedAt.IsZero())
 }
 
@@ -474,7 +475,9 @@ func TestStreamBridge_EventPush(t *testing.T) {
 	select {
 	case ev := <-sub.Events:
 		assert.Equal(t, "role.speak", ev.Type)
-		assert.Contains(t, ev.Data.(string), "测试内容")
+		data, ok := ev.Data.(map[string]interface{})
+		assert.True(t, ok)
+		assert.Contains(t, data["content"], "测试内容")
 	case <-time.After(time.Second):
 		t.Error("等待事件超时")
 	}

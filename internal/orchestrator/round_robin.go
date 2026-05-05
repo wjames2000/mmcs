@@ -45,7 +45,7 @@ type RoundRobinConfig struct {
 	ResumeCh    chan *session.ResumeSignal    `json:"-"`
 
 	// MsgStore 消息持久化存储（可选）
-	MsgStore *session.MessageStore `json:"-"`
+	MsgStore session.MessageStoreInterface `json:"-"`
 }
 
 // RoundRobinOrchestrator 轮询发言范式编排器

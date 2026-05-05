@@ -20,8 +20,13 @@ type ChatMessage struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// MessageStore 内存消息存储，支持并发安全
-// 线程安全：所有导出方法均使用 RWMutex 保护
+// MessageStoreInterface 消息存储接口（抽象，便于测试和多种实现）
+type MessageStoreInterface interface {
+	Add(sessionID string, round int, roleName, content string, tokens int) *ChatMessage
+	ListBySession(sessionID string) ([]*ChatMessage, error)
+	ClearBySession(sessionID string)
+	GetByID(id string) (*ChatMessage, error)
+}
 type MessageStore struct {
 	mu       sync.RWMutex
 	messages map[string][]*ChatMessage // sessionID → messages

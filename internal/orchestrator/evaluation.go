@@ -40,7 +40,7 @@ type EvaluationConfig struct {
 	ResumeCh    chan *session.ResumeSignal    `json:"-"`
 
 	// MsgStore 消息持久化存储（可选）
-	MsgStore *session.MessageStore `json:"-"`
+	MsgStore session.MessageStoreInterface `json:"-"`
 }
 
 // ScoringResult 单个专家评分结果

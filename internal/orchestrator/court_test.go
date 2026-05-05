@@ -384,7 +384,7 @@ func TestCourtBuildMinutes(t *testing.T) {
 
 	assert.Equal(t, "s_court_minutes", minutes.SessionID)
 	assert.Equal(t, 3, minutes.TotalMessages)
-	assert.Equal(t, "法庭讨论完成", minutes.Summary)
+	assert.Contains(t, minutes.Summary, "法庭讨论完成")
 }
 
 // mockChatModelWithDelay 带延迟的 mock 模型，用于超时测试

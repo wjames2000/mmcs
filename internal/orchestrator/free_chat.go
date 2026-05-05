@@ -23,7 +23,7 @@ type FreeChatConfig struct {
 	ResumeCh    chan *session.ResumeSignal    `json:"-"`
 
 	// MsgStore 消息持久化存储（可选）
-	MsgStore *session.MessageStore `json:"-"`
+	MsgStore session.MessageStoreInterface `json:"-"`
 }
 
 // FreeChatOrchestrator 自由群聊范式编排器

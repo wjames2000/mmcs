@@ -37,7 +37,7 @@ type Dependencies struct {
 	MetricsHandler      MetricsHandler
 	MaterialStore       *session.MaterialStore
 	ModelGateway        *model_gateway.Gateway
-	SessionMessageStore *session.MessageStore
+	SessionMessageStore session.MessageStoreInterface
 }
 
 // NewRouter 创建并注册所有路由
@@ -50,7 +50,7 @@ func NewRouter(deps *Dependencies) http.Handler {
 	authHandler := NewAuthHandler(deps.UserService)
 	workspaceHandler := NewWorkspaceHandler(deps.WorkspaceService, deps.TaskService)
 	roleHandler := NewRoleHandler(deps.RoleService)
-	sessionHandler := NewSessionHandler(deps.SessionService, deps.OrchestratorFactory, deps.HubRegistry, deps.MaterialStore, deps.SessionMessageStore)
+	sessionHandler := NewSessionHandler(deps.SessionService, deps.OrchestratorFactory, deps.HubRegistry, deps.MaterialStore, deps.SessionMessageStore, deps.ModelGateway)
 	agentHandler := NewAgentHandler(deps.AgentExecutor)
 	taskHandler := NewTaskHandler(deps.TaskService, deps.SessionService)
 

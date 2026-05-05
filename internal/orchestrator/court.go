@@ -24,7 +24,7 @@ type CourtConfig struct {
 	ResumeCh    chan *session.ResumeSignal    `json:"-"`
 
 	// MsgStore 消息持久化存储（可选）
-	MsgStore *session.MessageStore `json:"-"`
+	MsgStore session.MessageStoreInterface `json:"-"`
 }
 
 // CourtOrchestrator 法庭范式编排器

@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/wjames2000/mmcs/internal/api/middleware"
 	"github.com/wjames2000/mmcs/internal/minutes"
+	"github.com/wjames2000/mmcs/internal/model_gateway"
 	"github.com/wjames2000/mmcs/internal/orchestrator"
 	"github.com/wjames2000/mmcs/internal/session"
 	"github.com/wjames2000/mmcs/internal/stream"
@@ -43,7 +44,8 @@ type SessionHandler struct {
 	orchestratorFactory *orchestrator.Factory
 	hubRegistry         *stream.HubRegistry
 	materialStore       *session.MaterialStore
-	messageStore        *session.MessageStore
+	messageStore        session.MessageStoreInterface
+	modelGateway        *model_gateway.Gateway
 }
 
 // NewSessionHandler 创建会话 handler
@@ -52,7 +54,8 @@ func NewSessionHandler(
 	orchestratorFactory *orchestrator.Factory,
 	hubRegistry *stream.HubRegistry,
 	materialStore *session.MaterialStore,
-	messageStore *session.MessageStore,
+	messageStore session.MessageStoreInterface,
+	modelGateway *model_gateway.Gateway,
 ) *SessionHandler {
 	return &SessionHandler{
 		sessionService:      sessionService,
@@ -60,6 +63,7 @@ func NewSessionHandler(
 		hubRegistry:         hubRegistry,
 		materialStore:       materialStore,
 		messageStore:        messageStore,
+		modelGateway:        modelGateway,
 	}
 }
 
@@ -665,23 +669,122 @@ func (h *SessionHandler) ExtractTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 合并所有消息内容
+	// 统计角色数和轮次数
+	roleSet := make(map[string]bool)
+	roundSet := make(map[int]bool)
+	for _, m := range msgs {
+		if m.RoleName != "" {
+			roleSet[m.RoleName] = true
+		}
+		roundSet[m.Round] = true
+	}
+	numRoles := len(roleSet)
+	numRounds := len(roundSet)
+	maxTasks := numRoles * numRounds
+	if maxTasks < 1 {
+		maxTasks = 5
+	}
+	if maxTasks > 20 {
+		maxTasks = 20
+	}
+
+	// 构建消息摘要
+	var conv strings.Builder
+	for _, m := range msgs {
+		conv.WriteString(fmt.Sprintf("[%s - 第%d轮]: %s\n", m.RoleName, m.Round, m.Content))
+	}
+	conversation := conv.String()
+	if len(conversation) > 8000 {
+		conversation = conversation[:8000] + "..."
+	}
+
+	// 尝试使用 AI 模型提取任务
+	tasks := h.extractTasksWithModel(r.Context(), conversation, numRoles, numRounds, maxTasks)
+	if tasks == nil {
+		// 模型不可用或失败，回退到关键词提取
+		tasks = h.extractTasksWithKeywords(msgs)
+	}
+
+	middleware.WriteSuccess(w, tasks)
+}
+
+type taskItem struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Role        string `json:"role"`
+	Priority    string `json:"priority"`
+}
+
+func (h *SessionHandler) extractTasksWithModel(ctx context.Context, conversation string, numRoles, numRounds, maxTasks int) []taskItem {
+	if h.modelGateway == nil {
+		return nil
+	}
+
+	chatModel, err := h.modelGateway.GetChatModel("openai")
+	if err != nil {
+		log.Warn().Err(err).Msg("获取模型失败，回退到关键词提取任务")
+		return nil
+	}
+
+	prompt := fmt.Sprintf(`你是一个专业的会议纪要分析师。请分析以下会议讨论内容，提取需要完成的任务清单。
+
+要求：
+1. 每个任务应该是一个具体、可执行的行动项
+2. 总任务数不超过 %d 个
+3. 任务应该覆盖讨论中涉及的所有关键领域
+4. 每个任务标注负责人（从讨论角色中推断）
+5. 按优先级排序（high/medium/low）
+
+请以 JSON 数组格式返回，格式为：
+[{"title": "任务标题", "description": "任务描述", "role": "负责人角色", "priority": "high/medium/low"}]
+
+会议讨论内容：
+%s`, maxTasks, conversation)
+
+	resp, err := chatModel.Generate(ctx, &model_gateway.ChatRequest{
+		Messages: []model_gateway.ChatMessage{
+			{Role: "system", Content: "你是一个专业的会议纪要分析师，擅长从会议讨论中提取可执行的任务项。"},
+			{Role: "user", Content: prompt},
+		},
+	})
+	if err != nil {
+		log.Warn().Err(err).Msg("模型调用失败，回退到关键词提取任务")
+		return nil
+	}
+
+	// 尝试从响应中解析 JSON
+	content := resp.Content
+	// 移除可能的 markdown 代码块标记
+	content = strings.TrimSpace(content)
+	content = strings.TrimPrefix(content, "```json")
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSuffix(content, "```")
+	content = strings.TrimSpace(content)
+
+	var tasks []taskItem
+	if err := json.Unmarshal([]byte(content), &tasks); err != nil {
+		log.Warn().Err(err).Msg("解析模型响应失败，回退到关键词提取")
+		return nil
+	}
+
+	// 限制任务数量
+	if len(tasks) > maxTasks {
+		tasks = tasks[:maxTasks]
+	}
+
+	return tasks
+}
+
+func (h *SessionHandler) extractTasksWithKeywords(msgs []*session.ChatMessage) []taskItem {
 	var b strings.Builder
 	for _, m := range msgs {
 		b.WriteString(fmt.Sprintf("- %s: %s\n", m.RoleName, m.Content))
 	}
 	text := b.String()
 
-	// 使用关键字提取行动项
 	actionItems := task.ExtractActionItems(text)
-	type taskItem struct {
-		Title       string `json:"title"`
-		Description string `json:"description"`
-		Role        string `json:"role"`
-	}
 	result := make([]taskItem, 0, len(actionItems))
 	for _, item := range actionItems {
-		// 尝试从行动项文本中提取角色名
 		role := ""
 		for _, m := range msgs {
 			if strings.Contains(item, m.RoleName) {
@@ -693,12 +796,12 @@ func (h *SessionHandler) ExtractTasks(w http.ResponseWriter, r *http.Request) {
 			Title:       item,
 			Description: item,
 			Role:        role,
+			Priority:    "medium",
 		})
 	}
 
 	if result == nil {
 		result = []taskItem{}
 	}
-
-	middleware.WriteSuccess(w, result)
+	return result
 }

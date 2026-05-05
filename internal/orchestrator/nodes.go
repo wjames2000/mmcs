@@ -37,7 +37,7 @@ type DiscussionState struct {
 	ResumeCh    <-chan *session.ResumeSignal
 
 	// MsgStore 消息持久化存储（可选，为 nil 时不持久化）
-	MsgStore *session.MessageStore
+	MsgStore session.MessageStoreInterface
 
 	// LastRoundSummary 上一轮的主持人总结，用于第 2 轮+ 精简上下文
 	LastRoundSummary string
@@ -65,7 +65,7 @@ func (s *DiscussionState) SetInterruptChannels(interruptCh <-chan *session.Inter
 }
 
 // SetMessageStore 设置消息持久化存储
-func (s *DiscussionState) SetMessageStore(store *session.MessageStore) {
+func (s *DiscussionState) SetMessageStore(store session.MessageStoreInterface) {
 	s.MsgStore = store
 }
 
@@ -654,10 +654,12 @@ func (n *ModeratorEvalNode) Evaluate(state *DiscussionState) *EvalResult {
 		}
 	case solved:
 		// 问题已解决，结束讨论
+		summaryText := fmt.Sprintf("讨论共进行 %d 轮，%d 位专家参与。问题已解决，各方达成一致结论。", currentRound, len(state.Roles))
+		reasonText := fmt.Sprintf("第 %d 轮讨论完成，各专家达成以下共识：\n%s", currentRound, state.LastRoundSummary)
 		result = &EvalResult{
 			ShouldContinue: false,
-			Reason:         fmt.Sprintf("第 %d 轮讨论完成，问题已基本解决，各专家达成共识", currentRound),
-			Summary:        fmt.Sprintf("讨论共进行 %d 轮，%d 位专家参与。问题已解决，各方达成一致结论。", currentRound, len(state.Roles)),
+			Reason:         reasonText,
+			Summary:        summaryText + "\n" + state.LastRoundSummary,
 			Solved:         true,
 		}
 	case len(history) > 100:
@@ -723,11 +725,39 @@ type MeetingMinutes struct {
 func (n *SummarizeNode) GenerateSummary(state *DiscussionState, evalResult *EvalResult) *MeetingMinutes {
 	history := state.GetHistory()
 
+	// 构建更详细的总结：汇总各轮次的核心观点
+	var summaryBuilder strings.Builder
+	summaryBuilder.WriteString(evalResult.Summary)
+	summaryBuilder.WriteString("\n\n")
+
+	// 按角色分组历史消息
+	roleMessages := make(map[string][]string)
+	for _, msg := range history {
+		if msg.Role == "assistant" {
+			roleMessages[msg.Content[:min(len(msg.Content), 50)]] = append(roleMessages[msg.Content[:min(len(msg.Content), 50)]], msg.Content)
+		}
+	}
+
+	summaryBuilder.WriteString("## 各角色核心观点\n")
+	// 从状态中获取角色名
+	for _, rc := range state.Roles {
+		if lastMsg := state.GetRoleLastMessage(rc.Role.Name); lastMsg != "" {
+			summaryBuilder.WriteString(fmt.Sprintf("### %s\n%s\n\n", rc.Role.Name, truncateContent(lastMsg, 300)))
+		}
+	}
+
+	if state.LastRoundSummary != "" {
+		summaryBuilder.WriteString("\n## 最终总结\n")
+		summaryBuilder.WriteString(state.LastRoundSummary)
+	}
+
+	summary := summaryBuilder.String()
+
 	minutes := &MeetingMinutes{
 		SessionID:     state.SessionID,
 		TotalRounds:   state.GetCurrentRound(),
 		TotalMessages: len(history),
-		Summary:       evalResult.Summary,
+		Summary:       summary,
 		CompletedAt:   time.Now(),
 	}
 
@@ -735,11 +765,19 @@ func (n *SummarizeNode) GenerateSummary(state *DiscussionState, evalResult *Eval
 		_ = state.Bridge.Push(&stream.GraphEvent{
 			Type:      "done",
 			NodeName:  "summarize",
-			Content:   evalResult.Summary,
+			Content:   summary,
 			Metadata:  minutes,
 			Timestamp: time.Now(),
 		})
 	}
 
 	return minutes
+}
+
+// min 返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
