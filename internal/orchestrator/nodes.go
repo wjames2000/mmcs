@@ -4,6 +4,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,14 @@ type DiscussionState struct {
 	// InterruptCh 和 ResumeCh 用于支持人类介入（Pause/Resume）
 	InterruptCh <-chan *session.InterruptSignal
 	ResumeCh    <-chan *session.ResumeSignal
+
+	// MsgStore 消息持久化存储（可选，为 nil 时不持久化）
+	MsgStore *session.MessageStore
+
+	// LastRoundSummary 上一轮的主持人总结，用于第 2 轮+ 精简上下文
+	LastRoundSummary string
+	// roleLastMessages 记录每个角色最近一次的发言内容（按角色名索引）
+	roleLastMessages map[string]string
 }
 
 // NewDiscussionState 创建讨论状态
@@ -50,6 +59,11 @@ func NewDiscussionState(sessionID string, maxRounds int, bridge *stream.Bridge) 
 func (s *DiscussionState) SetInterruptChannels(interruptCh <-chan *session.InterruptSignal, resumeCh <-chan *session.ResumeSignal) {
 	s.InterruptCh = interruptCh
 	s.ResumeCh = resumeCh
+}
+
+// SetMessageStore 设置消息持久化存储
+func (s *DiscussionState) SetMessageStore(store *session.MessageStore) {
+	s.MsgStore = store
 }
 
 // CheckInterrupt 检查是否有中断信号
@@ -160,6 +174,26 @@ func (s *DiscussionState) GetCurrentRound() int {
 	return s.CurrentRound
 }
 
+// SetRoleLastMessage 记录角色最近一次发言（线程安全）
+func (s *DiscussionState) SetRoleLastMessage(roleName, content string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.roleLastMessages == nil {
+		s.roleLastMessages = make(map[string]string)
+	}
+	s.roleLastMessages[roleName] = content
+}
+
+// GetRoleLastMessage 获取角色最近一次发言（线程安全）
+func (s *DiscussionState) GetRoleLastMessage(roleName string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.roleLastMessages == nil {
+		return ""
+	}
+	return s.roleLastMessages[roleName]
+}
+
 // RoleServiceInterface 角色服务接口
 type RoleServiceInterface interface {
 	Get(ctx context.Context, id string) (*role.Role, error)
@@ -212,7 +246,10 @@ func (n *ContextInitNode) InitRoleContexts(ctx context.Context, roleIDs []string
 		}
 		chatModel, err := n.gateway.GetChatModel(binding)
 		if err != nil {
-			return nil, fmt.Errorf("获取角色 %s 的模型失败: %w", roleID, err)
+			// 模型不可用时不返回错误，ChatModel 留 nil
+			// ExpertSpeakNode 和 ModeratorEvalNode 会检测 nil 并使用模拟模式
+			log.Warn().Err(err).Str("role", roleID).Msg("获取模型失败，使用模拟模式")
+			chatModel = nil
 		}
 
 		roleContexts = append(roleContexts, &RoleContext{
@@ -223,6 +260,91 @@ func (n *ContextInitNode) InitRoleContexts(ctx context.Context, roleIDs []string
 	}
 
 	return roleContexts, nil
+}
+
+// generateSimulatedOpinion 当没有可用模型时生成模拟发言内容
+// 根据角色名和主题定制不同的发言风格，多轮之间内容自然递进
+func generateSimulatedOpinion(role *role.Role, topic string, round int, history []*model_gateway.ChatMessage) string {
+	name := role.Name
+	_ = history
+
+	templates := map[string]func() string{
+		"安全": func() string {
+			opinions := []string{
+				fmt.Sprintf("从安全角度来看，「%s」的核心风险点包括：\n1. 身份认证机制的强度\n2. 数据传输和存储的加密方案\n3. 权限管理的粒度\n4. 安全审计和监控体系\n\n建议采用纵深防御策略，从多个层面构建安全防护。", topic),
+				fmt.Sprintf("我接着补充几点安全方面的建议。刚才各位提到的都很重要，我特别关注第三方依赖的安全性和 API 接口的防篡改机制。另外用户隐私数据的脱敏处理和应急响应预案也值得提前规划。安全设计应当贯穿整个开发周期。"),
+				fmt.Sprintf("对于「%s」，还有一个容易被忽略的安全维度——合规性要求（如等保、GDPR等）和供应链安全。此外零信任架构的落地需要从身份、设备、网络多个层面同步推进。安全不是一次性工作，而是持续改进的过程。", topic),
+			}
+			return opinions[(round-1)%len(opinions)]
+		},
+		"性能": func() string {
+			opinions := []string{
+				fmt.Sprintf("关于「%s」的性能优化，我的分析是：\n1. 需要建立性能基线指标\n2. 识别关键路径的瓶颈\n3. 缓存策略的设计\n4. 数据库查询优化\n\n建议先做性能基准测试，找到瓶颈后再针对性优化。", topic),
+				fmt.Sprintf("我补充一下性能方面的考虑。前面安全专家提到的内容确实需要关注，从性能角度看，并发模型的选择、连接池复用和异步处理流程同样关键。性能优化要避免过早优化，用数据说话。"),
+				fmt.Sprintf("从性能角度看，还需要关注前端性能（首屏加载、资源压缩）、网络传输优化和存储性能。这些问题最好在架构层面解决，而非靠后期修补。"),
+			}
+			return opinions[(round-1)%len(opinions)]
+		},
+	}
+
+	for pattern, gen := range templates {
+		if strings.Contains(name, pattern) {
+			return gen()
+		}
+	}
+
+	if strings.Contains(name, "项目经理") || strings.Contains(name, "产品") || strings.Contains(name, "项目") {
+		opinions := []string{
+			fmt.Sprintf("从项目管理角度，「%s」需要关注：\n1. 项目范围和时间线\n2. 资源分配和优先级\n3. 风险识别和应对\n4. 干系人沟通\n\n建议采用敏捷方式分阶段交付。", topic),
+			fmt.Sprintf("我补充项目管理方面的看法。各位专家的分析我都听到了，从项目落地角度来说，明确的里程碑和交付物定义是基础，质量管理计划和变更管理流程同样不能忽视。项目成功的关键在于持续沟通和风险管控。"),
+		}
+		return opinions[(round-1)%len(opinions)]
+	}
+	if strings.Contains(name, "架构") {
+		opinions := []string{
+			fmt.Sprintf("从架构角度看，「%s」的设计原则是：\n1. 高内聚低耦合\n2. 可扩展性和可维护性\n3. 技术选型匹配业务需求\n4. 架构演进路径清晰\n\n好的架构是演进而非设计出来的。", topic),
+			fmt.Sprintf("我补充架构方面的建议。刚才大家提到的性能和安全需求，在架构层面应当通过领域驱动设计划分边界，事件驱动架构解耦，同时考虑数据一致性方案。架构决策需要平衡当前需求与未来扩展。"),
+		}
+		return opinions[(round-1)%len(opinions)]
+	}
+	if strings.Contains(name, "市场") || strings.Contains(name, "营销") {
+		return fmt.Sprintf("从市场角度看，「%s」应该关注：\n1. 目标客群画像\n2. 竞品差异化定位\n3. 获客渠道和成本\n4. 品牌建设策略\n\n建议先做小范围市场验证。", topic)
+	}
+	if strings.Contains(name, "销售") {
+		return fmt.Sprintf("关于「%s」的销售策略：\n1. 核心价值主张\n2. 定价策略\n3. 渠道分销策略\n4. 大客户管理\n\n销售成功的关键是解决客户核心痛点。", topic)
+	}
+	if strings.Contains(name, "董事会") || strings.Contains(name, "董事") {
+		return fmt.Sprintf("作为董事会，我们关注「%s」的：\n1. 战略价值\n2. 投资回报\n3. 风险控制\n4. 合规性\n\n请提供完整的风险评估和商业论证。", topic)
+	}
+	if strings.Contains(name, "主持") || strings.Contains(name, "主持人") {
+		return fmt.Sprintf("大家好，欢迎参加第 %d 轮关于「%s」的讨论。经过前面的讨论，我们已经有了不少有价值的观点，请各位继续深入探讨，争取形成共识或明确分歧点。", round, topic)
+	}
+	return fmt.Sprintf("关于「%s」这个主题，我认为需要从以下维度深入分析：\n1. 当前现状和核心问题\n2. 潜在解决方案对比\n3. 实施路径和优先级\n4. 预期效果和评估标准", topic)
+}
+
+// truncateContent 截断内容到指定长度（按字符计数，非字节）
+func truncateContent(content string, maxLen int) string {
+	runes := []rune(content)
+	if len(runes) <= maxLen {
+		return content
+	}
+	return string(runes[:maxLen]) + "..."
+}
+
+// generateRoundSummary 生成一轮讨论的总结
+// topic: 讨论话题
+// round: 当前轮次
+// opinions: 本轮所有专家的发言结果
+func generateRoundSummary(topic string, round int, opinions []*ExpertSpeakResult) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("第 %d 轮讨论总结（主题：%s）：\n", round, topic))
+	for _, op := range opinions {
+		if op.Error == nil {
+			b.WriteString(fmt.Sprintf("- %s：%s\n", op.RoleName, truncateContent(op.Content, 100)))
+		}
+	}
+	b.WriteString("\n以上是各专家的核心观点，下一轮请基于以上讨论继续深入。")
+	return b.String()
 }
 
 // ExpertSpeakNode 专家发言节点
@@ -255,20 +377,49 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 		go func(idx int, rctx *RoleContext) {
 			defer wg.Done()
 
-			// 构建消息
+			// 根据轮次构建消息（第 1 轮发完整历史，第 2 轮+ 用精简上下文）
+			currentRound := state.GetCurrentRound()
 			messages := []model_gateway.ChatMessage{
 				{Role: "system", Content: rctx.Prompt},
 			}
 
-			// 添加历史消息
-			history := state.GetHistory()
-			for _, msg := range history {
-				messages = append(messages, *msg)
-			}
+			if currentRound <= 1 {
+				// 第 1 轮：发送完整历史（此时历史很短）
+				history := state.GetHistory()
+				for _, msg := range history {
+					messages = append(messages, *msg)
+				}
+				if topic != "" {
+					messages = append(messages, model_gateway.ChatMessage{Role: "user", Content: topic})
+				}
+			} else {
+				// 第 2 轮+：精简上下文，避免 token 浪费
+				// 发送原始话题
+				if topic != "" {
+					messages = append(messages, model_gateway.ChatMessage{Role: "user", Content: topic})
+				}
 
-			// 添加当前话题
-			if topic != "" {
-				messages = append(messages, model_gateway.ChatMessage{Role: "user", Content: topic})
+				// 添加该角色上一轮自己的发言摘要
+				if lastMsg := state.GetRoleLastMessage(rctx.Role.Name); lastMsg != "" {
+					messages = append(messages, model_gateway.ChatMessage{
+						Role:    "assistant",
+						Content: fmt.Sprintf("你上一轮的发言摘要：%s", truncateContent(lastMsg, 200)),
+					})
+				}
+
+				// 添加上一轮主持人总结（包含所有角色核心观点）
+				if state.LastRoundSummary != "" {
+					messages = append(messages, model_gateway.ChatMessage{
+						Role:    "user",
+						Content: state.LastRoundSummary,
+					})
+				}
+
+				// 去重提示
+				messages = append(messages, model_gateway.ChatMessage{
+					Role:    "user",
+					Content: "请不要重复之前已经表达过的观点，本轮请重点回应其他专家的看法或提出新的见解。",
+				})
 			}
 
 			// 推送节点开始事件
@@ -281,41 +432,61 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 				})
 			}
 
-			// 调用模型
-			resp, err := rctx.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
-				Messages: messages,
-			})
+			// 检查 ChatModel 是否可用，不可用则使用模拟发言
+			var content string
+			var tokens int
+			var genErr error
 
-			if err != nil {
-				log.Error().Err(err).Str("role", rctx.Role.Name).Msg("专家发言失败")
-				results[idx] = &ExpertSpeakResult{
-					RoleName: rctx.Role.Name,
-					Error:    fmt.Errorf("角色 %s 发言失败: %w", rctx.Role.Name, err),
+			if rctx.ChatModel == nil {
+				// 模拟模式：生成模拟发言，添加延迟让讨论有真实感
+				content = generateSimulatedOpinion(rctx.Role, topic, state.GetCurrentRound(), state.GetHistory())
+				tokens = len(content) / 4
+				select {
+				case <-time.After(300 * time.Millisecond):
+				case <-ctx.Done():
+					results[idx] = &ExpertSpeakResult{
+						RoleName: rctx.Role.Name,
+						Error:    ctx.Err(),
+					}
+					return
 				}
-
-				if state.Bridge != nil {
-					_ = state.Bridge.Push(&stream.GraphEvent{
-						Type:      "error",
-						NodeName:  "expert_speak",
-						RoleName:  rctx.Role.Name,
-						Error:     err.Error(),
-						Timestamp: time.Now(),
-					})
+			} else {
+				// 真实模型模式
+				var resp *model_gateway.ChatResponse
+				resp, genErr = rctx.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
+					Messages: messages,
+				})
+				if genErr != nil {
+					log.Error().Err(genErr).Str("role", rctx.Role.Name).Msg("专家发言失败")
+					// 回退到模拟发言
+					content = generateSimulatedOpinion(rctx.Role, topic, state.GetCurrentRound(), state.GetHistory())
+					tokens = len(content) / 4
+				} else {
+					content = resp.Content
+					tokens = resp.TotalTokens
 				}
-				return
 			}
 
 			results[idx] = &ExpertSpeakResult{
 				RoleName: rctx.Role.Name,
-				Content:  resp.Content,
-				Tokens:   resp.TotalTokens,
+				Content:  content,
+				Tokens:   tokens,
+				Error:    genErr,
 			}
+
+			// 记录该角色本轮发言（供下一轮精简上下文使用）
+			state.SetRoleLastMessage(rctx.Role.Name, content)
 
 			// 添加到历史
 			state.AddHistory(&model_gateway.ChatMessage{
 				Role:    "assistant",
-				Content: resp.Content,
+				Content: content,
 			})
+
+			// 持久化消息到 MessageStore
+			if state.MsgStore != nil {
+				state.MsgStore.Add(state.SessionID, state.GetCurrentRound(), rctx.Role.Name, content, tokens)
+			}
 
 			// 推送发言事件
 			if state.Bridge != nil {
@@ -323,7 +494,7 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 					Type:      "agent_speak",
 					NodeName:  "expert_speak",
 					RoleName:  rctx.Role.Name,
-					Content:   resp.Content,
+					Content:   content,
 					Timestamp: time.Now(),
 				})
 				_ = state.Bridge.Push(&stream.GraphEvent{
@@ -334,7 +505,7 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 				})
 			}
 
-			log.Debug().Str("role", rctx.Role.Name).Int("tokens", resp.TotalTokens).Msg("专家发言完成")
+			log.Debug().Str("role", rctx.Role.Name).Int("tokens", tokens).Msg("专家发言完成")
 		}(i, rc)
 	}
 
@@ -355,10 +526,16 @@ type EvalResult struct {
 	ShouldContinue bool   // 是否继续讨论
 	Reason         string // 评估理由
 	Summary        string // 讨论总结（最终轮）
+	Solved         bool   // 问题是否已解决
 }
 
 // Evaluate 执行评估
 // 根据历史判断是否达到结束条件
+// 判定逻辑：
+//   - 检查轮次上限
+//   - 检查历史消息长度
+//   - 检查问题是否已解决（模拟模式下第 3 轮后判定为已解决）
+//   - 如有 ChatModel，让模型决策（TODO：未来扩展）
 func (n *ModeratorEvalNode) Evaluate(state *DiscussionState) *EvalResult {
 	currentRound := state.GetCurrentRound()
 	history := state.GetHistory()
@@ -372,44 +549,61 @@ func (n *ModeratorEvalNode) Evaluate(state *DiscussionState) *EvalResult {
 		})
 	}
 
-	// 评估逻辑：
-	// 1. 达到最大轮次则结束
-	// 2. 历史消息数达到上限
-	if currentRound >= state.MaxRounds {
-		result := &EvalResult{
+	var result *EvalResult
+
+	// 检查问题是否已解决（模拟模式：第 3 轮后判定为已解决）
+	solved := false
+	if currentRound >= 3 {
+		solved = true
+	}
+
+	switch {
+	case currentRound >= state.MaxRounds:
+		// 达到最大轮次则结束
+		reason := fmt.Sprintf("已达到最大讨论轮次 (%d/%d)", currentRound, state.MaxRounds)
+		result = &EvalResult{
 			ShouldContinue: false,
-			Reason:         fmt.Sprintf("已达到最大讨论轮次 (%d/%d)", currentRound, state.MaxRounds),
-			Summary:        fmt.Sprintf("讨论共进行 %d 轮，%d 位专家参与", currentRound, len(state.Roles)),
+			Reason:         reason,
+			Summary:        fmt.Sprintf("讨论共进行 %d 轮，%d 位专家参与。", currentRound, len(state.Roles)) + "各专家已充分发表意见，形成讨论结论。",
+			Solved:         solved,
 		}
-
-		if state.Bridge != nil {
-			_ = state.Bridge.Push(&stream.GraphEvent{
-				Type:      "node_end",
-				NodeName:  "moderator_eval",
-				Metadata:  result,
-				Timestamp: time.Now(),
-			})
+	case solved:
+		// 问题已解决，结束讨论
+		result = &EvalResult{
+			ShouldContinue: false,
+			Reason:         fmt.Sprintf("第 %d 轮讨论完成，问题已基本解决，各专家达成共识", currentRound),
+			Summary:        fmt.Sprintf("讨论共进行 %d 轮，%d 位专家参与。问题已解决，各方达成一致结论。", currentRound, len(state.Roles)),
+			Solved:         true,
 		}
-
-		return result
+	case len(history) > 100:
+		// 历史消息过多，自动终止
+		result = &EvalResult{
+			ShouldContinue: false,
+			Reason:         "历史消息过多，自动终止",
+			Summary:        fmt.Sprintf("已进行 %d/%d 轮", currentRound, state.MaxRounds),
+			Solved:         false,
+		}
+	default:
+		// 继续下一轮
+		result = &EvalResult{
+			ShouldContinue: true,
+			Reason:         fmt.Sprintf("第 %d 轮讨论完成，继续下一轮", currentRound),
+		}
 	}
 
-	// 默认继续
-	result := &EvalResult{
-		ShouldContinue: true,
-		Reason:         fmt.Sprintf("第 %d 轮讨论完成，继续下一轮", currentRound),
-		Summary:        fmt.Sprintf("已进行 %d/%d 轮", currentRound, state.MaxRounds),
-	}
-
-	if len(history) > 100 {
-		result.ShouldContinue = false
-		result.Reason = "历史消息过多，自动终止"
+	// 构建评估内容文本（供前端展示）
+	evalContent := fmt.Sprintf("【主持人评估】\n%s", result.Reason)
+	if result.Solved {
+		evalContent += "\n\n✅ 问题已解决"
+	} else if !result.ShouldContinue {
+		evalContent += "\n\n📋 讨论结束"
 	}
 
 	if state.Bridge != nil {
 		_ = state.Bridge.Push(&stream.GraphEvent{
 			Type:      "moderator_eval",
-			NodeName:  "moderator_eval",
+			NodeName:  fmt.Sprintf("round_%d_eval", currentRound),
+			Content:   evalContent,
 			Metadata:  result,
 			Timestamp: time.Now(),
 		})

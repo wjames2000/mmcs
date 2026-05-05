@@ -22,6 +22,9 @@ type CourtConfig struct {
 	// InterruptCh 和 ResumeCh 用于支持人类介入（Pause/Resume）
 	InterruptCh chan *session.InterruptSignal `json:"-"`
 	ResumeCh    chan *session.ResumeSignal    `json:"-"`
+
+	// MsgStore 消息持久化存储（可选）
+	MsgStore *session.MessageStore `json:"-"`
 }
 
 // CourtOrchestrator 法庭范式编排器
@@ -82,6 +85,9 @@ func (c *CourtOrchestrator) Execute(
 	state.Roles = roleContexts
 	if config.InterruptCh != nil && config.ResumeCh != nil {
 		state.SetInterruptChannels(config.InterruptCh, config.ResumeCh)
+	}
+	if config.MsgStore != nil {
+		state.SetMessageStore(config.MsgStore)
 	}
 
 	// 分离作者角色和审查员角色
@@ -210,12 +216,31 @@ func (c *CourtOrchestrator) executeAuthorStatement(
 		{Role: "user", Content: fmt.Sprintf("请详细陈述你的设计方案或代码实现意图。\n\n主题：%s\n\n请从以下方面阐述：\n1. 设计思路和架构决策\n2. 关键实现细节\n3. 预期效果和收益\n4. 潜在的改进空间", topic)},
 	}
 
-	resp, err := authorRC.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
-		Messages:    messages,
-		Temperature: 0.7,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("作者陈述失败: %w", err)
+	var (
+		resp *model_gateway.ChatResponse
+		err  error
+	)
+	if authorRC.ChatModel == nil {
+		// 模拟模式
+		simulated := generateSimulatedOpinion(authorRC.Role, topic, state.GetCurrentRound(), state.GetHistory())
+		resp = &model_gateway.ChatResponse{
+			Content:     simulated,
+			TotalTokens: len(simulated) / 4,
+			Model:       "simulated",
+		}
+		select {
+		case <-time.After(300 * time.Millisecond):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	} else {
+		resp, err = authorRC.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
+			Messages:    messages,
+			Temperature: 0.7,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("作者陈述失败: %w", err)
+		}
 	}
 
 	// 添加到历史
@@ -320,12 +345,31 @@ func (c *CourtOrchestrator) executeAuthorResponse(
 请以结构化方式回应，每条意见对应一个条目。`,
 	})
 
-	resp, err := authorRC.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
-		Messages:    messages,
-		Temperature: 0.7,
-	})
-	if err != nil {
-		return fmt.Errorf("作者回应失败: %w", err)
+	var (
+		resp *model_gateway.ChatResponse
+		err  error
+	)
+	if authorRC.ChatModel == nil {
+		// 模拟模式
+		simulated := fmt.Sprintf("感谢各位审查员的宝贵意见。针对大家的反馈，我的回应如下：\n\n1. 关于架构设计方面，我认同审查员提出的模块化建议，将在下一版中优化。\n2. 对于安全方面的顾虑，我已经考虑了基本的防护措施，后续会加强。\n3. 性能优化是一个持续的过程，我会将相关建议纳入实施计划。\n\n感谢大家的评审，我会综合所有意见进行改进。")
+		resp = &model_gateway.ChatResponse{
+			Content:     simulated,
+			TotalTokens: len(simulated) / 4,
+			Model:       "simulated",
+		}
+		select {
+		case <-time.After(300 * time.Millisecond):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	} else {
+		resp, err = authorRC.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
+			Messages:    messages,
+			Temperature: 0.7,
+		})
+		if err != nil {
+			return fmt.Errorf("作者回应失败: %w", err)
+		}
 	}
 
 	// 添加到历史

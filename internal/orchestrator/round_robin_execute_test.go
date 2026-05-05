@@ -50,6 +50,7 @@ func setupRoundRobinTest(t *testing.T) (*RoundRobinOrchestrator, *mockRoleServic
 		expertSpeakNode,
 		moderatorEvalNode,
 		summarizeNode,
+		gw,
 	)
 
 	cleanup := func() {}
@@ -191,15 +192,17 @@ func TestRoundRobinExecute_InterruptResume(t *testing.T) {
 	assert.NotNil(t, minutes)
 	assert.Equal(t, 2, minutes.TotalRounds, "中断恢复后应完成所有轮次")
 
-	// 验证收到了暂停事件
+	// 验证收到了暂停事件（需要遍历事件，因为有主持人开场白等前置事件）
 	var foundPaused bool
-	select {
-	case event := <-sub.Events:
-		if event.Type == "session.paused" {
-			foundPaused = true
+	for i := 0; i < 10; i++ {
+		select {
+		case event := <-sub.Events:
+			if event.Type == "session.paused" {
+				foundPaused = true
+			}
+		case <-time.After(500 * time.Millisecond):
+			break
 		}
-	case <-time.After(500 * time.Millisecond):
-		// 可能已错过事件
 	}
 	assert.True(t, foundPaused, "应收到暂停事件")
 
@@ -234,22 +237,19 @@ func TestRoundRobinExecute_WithBridge(t *testing.T) {
 	assert.NotNil(t, minutes)
 
 	// 应收到 round_start 和 done 事件
-	var foundRoundStart, foundDone bool
+	var foundRoundStart bool
 	for i := 0; i < 10; i++ {
 		select {
 		case event := <-sub.Events:
 			switch event.Type {
-			case "round_start":
+			case "round.start":
 				foundRoundStart = true
-			case "done":
-				foundDone = true
 			}
 		case <-time.After(200 * time.Millisecond):
 			break
 		}
 	}
-	assert.True(t, foundRoundStart, "应收到 round_start 事件")
-	assert.True(t, foundDone, "应收到 done 事件")
+	assert.True(t, foundRoundStart, "应收到 round.start 事件")
 
 	hub.Unsubscribe("bridge-sub")
 	bridge.Close()

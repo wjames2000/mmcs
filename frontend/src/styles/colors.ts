@@ -9,16 +9,17 @@ export const ROLE_COLORS: Record<string, { border: string; dot: string; bg: stri
   '产品经理': { border: '#7c3aed', dot: '#7c3aed', bg: '#faf5ff', light: '#f3e8ff' },
   '技术负责人': { border: '#2563eb', dot: '#2563eb', bg: '#eff6ff', light: '#dbeafe' },
   '质疑者': { border: '#ea580c', dot: '#ea580c', bg: '#fff7ed', light: '#ffedd5' },
+  '项目经理': { border: '#0891b2', dot: '#0891b2', bg: '#ecfeff', light: '#cffafe' },         // cyan
+  '软件系统架构师': { border: '#6366f1', dot: '#6366f1', bg: '#eef2ff', light: '#e0e7ff' },     // indigo
+  '酒店市场总监': { border: '#d946ef', dot: '#d946ef', bg: '#fdf4ff', light: '#fae8ff' },       // fuchsia
+  '酒店销售总监': { border: '#d97706', dot: '#d97706', bg: '#fffbeb', light: '#fef3c7' },       // amber
+  '酒店集团董事会': { border: '#ec4899', dot: '#ec4899', bg: '#fdf2f8', light: '#fce7f3' },     // pink
 }
 
 // 默认角色色值（用于未在预置列表中的角色）
+// 注意：cyan/fuchsia/amber/indigo/pink 已被 ROLE_COLORS 中的新角色占用
 const DEFAULT_COLORS = [
-  { border: '#0891b2', dot: '#0891b2', bg: '#ecfeff', light: '#cffafe' }, // cyan
-  { border: '#d946ef', dot: '#d946ef', bg: '#fdf4ff', light: '#fae8ff' }, // fuchsia
   { border: '#059669', dot: '#059669', bg: '#ecfdf5', light: '#d1fae5' }, // emerald
-  { border: '#d97706', dot: '#d97706', bg: '#fffbeb', light: '#fef3c7' }, // amber
-  { border: '#6366f1', dot: '#6366f1', bg: '#eef2ff', light: '#e0e7ff' }, // indigo
-  { border: '#ec4899', dot: '#ec4899', bg: '#fdf2f8', light: '#fce7f3' }, // pink
 ]
 
 const colorIndexMap = new Map<string, number>()

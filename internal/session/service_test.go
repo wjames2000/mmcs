@@ -128,6 +128,13 @@ func (m *mockStorage) RemoveSessionRole(ctx context.Context, sessionID, roleID s
 	return nil
 }
 
+func (m *mockStorage) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.sessions, id)
+	return nil
+}
+
 // ===== Mock RoleProvider =====
 
 type mockRoleProvider struct {

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/wjames2000/mmcs/internal/api/middleware"
+	"github.com/wjames2000/mmcs/internal/minutes"
 	"github.com/wjames2000/mmcs/internal/session"
 	"github.com/wjames2000/mmcs/internal/stream"
 	"github.com/wjames2000/mmcs/internal/user"
@@ -34,6 +35,7 @@ type mockSessionService struct {
 	terminateFn    func(ctx context.Context, id string) error
 	initChFn       func(sessionID string) *session.SessionChannels
 	removeChFn     func(sessionID string)
+	getMinutesFn   func(ctx context.Context, id string) (*minutes.MeetingMinutes, error)
 }
 
 func (m *mockSessionService) Create(ctx context.Context, creatorID string, req *session.CreateRequest) (*session.CreateResponse, error) {
@@ -113,6 +115,48 @@ func (m *mockSessionService) RemoveChannels(sessionID string) {
 	if m.removeChFn != nil {
 		m.removeChFn(sessionID)
 	}
+}
+
+func (m *mockSessionService) GetMinutes(ctx context.Context, id string) (*minutes.MeetingMinutes, error) {
+	if m.getMinutesFn != nil {
+		return m.getMinutesFn(ctx, id)
+	}
+	return &minutes.MeetingMinutes{SessionID: id}, nil
+}
+
+func (m *mockSessionService) Archive(ctx context.Context, id string) error {
+	return nil
+}
+
+func (m *mockSessionService) Delete(ctx context.Context, id string) error {
+	return m.Terminate(ctx, id)
+}
+
+func (m *mockSessionService) GetMergedMinutes(ctx context.Context, newSessionID, originalSessionID string) (*session.MergedMinutes, error) {
+	return &session.MergedMinutes{
+		OriginalSessionID: originalSessionID,
+		NewSessionID:      newSessionID,
+		OriginalTitle:     "原会话",
+		NewTitle:          "新会话",
+	}, nil
+}
+
+func (m *mockSessionService) Restart(ctx context.Context, originalSessionID, creatorID, newTitle, newTopic string, roleIDs []string, roleBindings []session.RoleBinding) (*session.CreateResponse, error) {
+	return &session.CreateResponse{
+		Session: &session.Session{
+			ID:              "s_new_restart",
+			WorkspaceID:     "ws_1",
+			Title:           newTitle,
+			Status:          session.StatusDraft,
+			ParentSessionID: &originalSessionID,
+			CreatorID:       creatorID,
+			CreatedAt:       time.Now(),
+			UpdatedAt:       time.Now(),
+		},
+		SessionRoles: []*session.SessionRole{
+			{ID: "sr_1", SessionID: "s_new_restart", RoleID: "role_1"},
+		},
+	}, nil
 }
 
 // ===== 辅助函数 =====

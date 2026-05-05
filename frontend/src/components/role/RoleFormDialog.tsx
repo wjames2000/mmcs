@@ -33,7 +33,7 @@ export default function RoleFormDialog({ open, role, onClose, onSubmit }: Props)
 
     // Load available skills
     api.getSkills().then(skills => {
-      setAvailableSkills(skills.map((s: any) => s.name || s))
+      setAvailableSkills(skills.map((s: any) => s.name || s.Name || s))
     }).catch(() => {})
 
     if (role) {
@@ -73,7 +73,7 @@ export default function RoleFormDialog({ open, role, onClose, onSubmit }: Props)
         expertise: expertiseStr.split(',').map(s => s.trim()).filter(Boolean),
         speaking_style: speakingStyle,
         system_prompt: systemPrompt,
-        skills,
+        skills: skills.map(s => typeof s === 'string' ? s : s.Name || s.name || String(s)),
       }, role?.id)
       onClose()
     } catch (err: any) {
@@ -87,8 +87,9 @@ export default function RoleFormDialog({ open, role, onClose, onSubmit }: Props)
     setTraits(prev => ({ ...prev, [key]: value }))
   }
 
-  const toggleSkill = (skill: string) => {
-    setSkills(prev => prev.includes(skill) ? prev.filter(s => s !== skill) : [...prev, skill])
+  const toggleSkill = (skill: any) => {
+    const name = typeof skill === 'string' ? skill : skill.Name || skill.name || String(skill)
+    setSkills(prev => prev.includes(name) ? prev.filter(s => s !== name) : [...prev, name])
   }
 
   return (
@@ -172,27 +173,66 @@ export default function RoleFormDialog({ open, role, onClose, onSubmit }: Props)
           </div>
 
           {/* Skills */}
-          {availableSkills.length > 0 && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Skills</label>
-              <div className="flex flex-wrap gap-1.5">
-                {availableSkills.map(skill => (
-                  <button
-                    key={skill}
-                    type="button"
-                    onClick={() => toggleSkill(skill)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
-                      skills.includes(skill)
-                        ? 'bg-blue-50 border-blue-300 text-blue-700'
-                        : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
-                    }`}
-                  >
-                    {skill}
-                  </button>
-                ))}
-              </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Skills</label>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {skills.map(s => (
+                <span key={s} className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 border border-blue-300 text-blue-700 text-xs font-medium rounded-lg">
+                  {s}
+                  <button type="button" onClick={() => setSkills(prev => prev.filter(x => x !== s))} className="text-blue-400 hover:text-blue-600">✕</button>
+                </span>
+              ))}
             </div>
-          )}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                id="custom-skill-input"
+                placeholder="输入自定义 Skill 名称"
+                className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    const input = document.getElementById('custom-skill-input') as HTMLInputElement
+                    const val = input.value.trim()
+                    if (val && !skills.includes(val)) {
+                      setSkills(prev => [...prev, val])
+                    }
+                    input.value = ''
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const input = document.getElementById('custom-skill-input') as HTMLInputElement
+                  const val = input.value.trim()
+                  if (val && !skills.includes(val)) {
+                    setSkills(prev => [...prev, val])
+                  }
+                  input.value = ''
+                }}
+                className="px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 border border-blue-200 rounded-lg"
+              >
+                + 添加
+              </button>
+            </div>
+            {availableSkills.length > 0 && (
+              <div className="mt-2">
+                <p className="text-xs text-gray-400 mb-1">预设技能（点击添加）：</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {availableSkills.map(s => {
+                    const name = typeof s === 'string' ? s : s.Name || s.name || String(s)
+                    return skills.includes(name) ? null : (
+                      <button key={name} type="button" onClick={() => setSkills(prev => [...prev, name])}
+                        className="px-2 py-0.5 bg-gray-50 border border-gray-200 text-gray-500 hover:border-gray-300 text-xs rounded-lg">
+                        + {name}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">系统提示词</label>

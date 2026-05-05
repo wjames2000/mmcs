@@ -138,9 +138,13 @@ func main() {
 	})
 	log.Info().Msg("Provider 缓存初始化完成")
 
-	// 8. Graph 池 & 会话服务
+	// 8. 会议材料存储
+	materialStore := session.NewMaterialStore()
+
+	// 9. Graph 池 & 会话服务
 	graphPool := session.NewGraphPool(cfg.Session.GraphPoolSize)
 	sessionSvc := session.NewService(sessionRepo, graphPool, roleSvc)
+	sessionSvc.SetMaterialStore(materialStore)
 
 	// 设置 GraphPool 大小指标
 	mmcsmetrics.GraphPoolSize.WithLabelValues("capacity").Set(float64(cfg.Session.GraphPoolSize))
@@ -170,6 +174,7 @@ func main() {
 		HubRegistry:         hubRegistry,
 		HealthHandler:       healthHandler,
 		MetricsHandler:      mmcsmetrics.MetricsHandler(),
+		MaterialStore:       materialStore,
 	}
 	handler := api.NewRouter(deps)
 

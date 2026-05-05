@@ -25,10 +25,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true)
     try {
       const res = await api.login(email, password) as LoginResponse
-      setToken(res.token)
-      setUser(res.user)
-      authStore.setToken(res.token)
-      authStore.setStoredUser(res.user)
+      const accessToken = res.access_token || (res as any).token
+      const userData = res.user
+      setToken(accessToken)
+      setUser(userData)
+      authStore.setToken(accessToken)
+      authStore.setStoredUser(userData)
     } finally {
       setIsLoading(false)
     }
@@ -38,10 +40,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true)
     try {
       const res = await api.register(name, email, password) as RegisterResponse
-      setToken(res.token)
-      setUser(res.user)
-      authStore.setToken(res.token)
-      authStore.setStoredUser(res.user)
+      // Register response may not auto-login; need separate login
+      // If it returns token/user, use them; otherwise user will redirect to login
+      const accessToken = (res as any).access_token || (res as any).token
+      if (accessToken) {
+        setToken(accessToken)
+        authStore.setToken(accessToken)
+      }
+      if ((res as any).user) {
+        setUser((res as any).user)
+        authStore.setStoredUser((res as any).user)
+      }
     } finally {
       setIsLoading(false)
     }

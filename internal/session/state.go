@@ -4,11 +4,12 @@ import "fmt"
 
 // 会话状态常量
 const (
-	StatusDraft   = "draft"
-	StatusRunning = "running"
-	StatusPaused  = "paused"
-	StatusEnded   = "ended"
-	StatusFailed  = "failed"
+	StatusDraft    = "draft"
+	StatusRunning  = "running"
+	StatusPaused   = "paused"
+	StatusEnded    = "ended"
+	StatusFailed   = "failed"
+	StatusArchived = "archived"
 )
 
 // validTransitions 定义状态机的合法转换
@@ -28,9 +29,11 @@ var validTransitions = map[string]map[string]bool{
 		StatusEnded:   true,
 		StatusFailed:  true,
 	},
-	StatusEnded: {}, // 终态，不可转换
+	StatusEnded: {
+		StatusArchived: true,
+	},
 	StatusFailed: {
-		StatusDraft: true, // 允许从失败恢复到草稿状态
+		StatusArchived: true,
 	},
 }
 

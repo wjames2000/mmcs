@@ -54,7 +54,7 @@ func (s *Service) Create(ctx context.Context, creatorID string, req *CreateReque
 		Description: req.Description,
 		Mode:        req.Mode,
 		Status:      "active",
-		Members:     req.Members,
+		Members:     ensureStrings(req.Members),
 		CreatorID:   creatorID,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -66,6 +66,14 @@ func (s *Service) Create(ctx context.Context, creatorID string, req *CreateReque
 
 	log.Info().Str("workspace_id", w.ID).Str("creator_id", creatorID).Msg("工作区创建成功")
 	return w, nil
+}
+
+// ensureStrings 确保字符串切片不为 nil，避免数据库 NULL 问题
+func ensureStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 // Get 获取工作区

@@ -38,6 +38,9 @@ type EvaluationConfig struct {
 	// InterruptCh 和 ResumeCh 用于支持人类介入（Pause/Resume）
 	InterruptCh chan *session.InterruptSignal `json:"-"`
 	ResumeCh    chan *session.ResumeSignal    `json:"-"`
+
+	// MsgStore 消息持久化存储（可选）
+	MsgStore *session.MessageStore `json:"-"`
 }
 
 // ScoringResult 单个专家评分结果
@@ -151,6 +154,9 @@ func (e *EvaluationOrchestrator) Execute(
 	state.Roles = roleContexts
 	if config.InterruptCh != nil && config.ResumeCh != nil {
 		state.SetInterruptChannels(config.InterruptCh, config.ResumeCh)
+	}
+	if config.MsgStore != nil {
+		state.SetMessageStore(config.MsgStore)
 	}
 	state.IncrementRound()
 
@@ -276,13 +282,31 @@ func (e *EvaluationOrchestrator) executeExpertScoring(
 				{Role: "user", Content: scoringPrompt},
 			}
 
-			resp, err := rc.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
-				Messages:    messages,
-				Temperature: 0.5,
-			})
-			if err != nil {
-				log.Error().Err(err).Str("role", rc.Role.Name).Msg("专家评分失败")
-				return
+			var (
+				resp *model_gateway.ChatResponse
+				err  error
+			)
+			if rc.ChatModel == nil {
+				simulated := generateSimulatedOpinion(rc.Role, config.Topic, 1, nil)
+				resp = &model_gateway.ChatResponse{
+					Content:     simulated,
+					TotalTokens: len(simulated) / 4,
+					Model:       "simulated",
+				}
+				select {
+				case <-time.After(300 * time.Millisecond):
+				case <-ctx.Done():
+					return
+				}
+			} else {
+				resp, err = rc.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
+					Messages:    messages,
+					Temperature: 0.5,
+				})
+				if err != nil {
+					log.Error().Err(err).Str("role", rc.Role.Name).Msg("专家评分失败")
+					return
+				}
 			}
 
 			state.AddHistory(&model_gateway.ChatMessage{
@@ -373,13 +397,31 @@ func (e *EvaluationOrchestrator) executeCriticChallenge(
 			config.Topic, formatOptions(config.Options), scoringSummary)},
 	}
 
-	resp, err := criticRC.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
-		Messages:    messages,
-		Temperature: 0.8,
-	})
-	if err != nil {
-		log.Error().Err(err).Msg("批评者质疑失败")
-		return nil
+	var (
+		resp *model_gateway.ChatResponse
+		err  error
+	)
+	if criticRC.ChatModel == nil {
+		simulated := generateSimulatedOpinion(criticRC.Role, config.Topic, 1, nil)
+		resp = &model_gateway.ChatResponse{
+			Content:     simulated,
+			TotalTokens: len(simulated) / 4,
+			Model:       "simulated",
+		}
+		select {
+		case <-time.After(300 * time.Millisecond):
+		case <-ctx.Done():
+			return nil
+		}
+	} else {
+		resp, err = criticRC.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
+			Messages:    messages,
+			Temperature: 0.8,
+		})
+		if err != nil {
+			log.Error().Err(err).Msg("批评者质疑失败")
+			return nil
+		}
 	}
 
 	state.AddHistory(&model_gateway.ChatMessage{
@@ -478,13 +520,31 @@ func (e *EvaluationOrchestrator) executeScoreAdjustment(
 					challengeSummary, origSummary)},
 			}
 
-			resp, err := rc.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
-				Messages:    messages,
-				Temperature: 0.6,
-			})
-			if err != nil {
-				log.Error().Err(err).Str("role", rc.Role.Name).Msg("评分调整失败")
-				return
+			var (
+				resp *model_gateway.ChatResponse
+				err  error
+			)
+			if rc.ChatModel == nil {
+				simulated := generateSimulatedOpinion(rc.Role, config.Topic, 1, nil)
+				resp = &model_gateway.ChatResponse{
+					Content:     simulated,
+					TotalTokens: len(simulated) / 4,
+					Model:       "simulated",
+				}
+				select {
+				case <-time.After(300 * time.Millisecond):
+				case <-ctx.Done():
+					return
+				}
+			} else {
+				resp, err = rc.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
+					Messages:    messages,
+					Temperature: 0.6,
+				})
+				if err != nil {
+					log.Error().Err(err).Str("role", rc.Role.Name).Msg("评分调整失败")
+					return
+				}
 			}
 
 			state.AddHistory(&model_gateway.ChatMessage{

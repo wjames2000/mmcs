@@ -29,7 +29,9 @@ export default function WorkspaceDetail() {
       setWorkspace(ws)
       setSessions(sess || [])
     } catch (err: any) {
-      setError(err.message || '加载工作区失败')
+      console.error('[WorkspaceDetail] load error:', err)
+      const msg = typeof err === 'string' ? err : err?.message || err?.error || '加载工作区失败'
+      setError(msg)
     } finally {
       setLoading(false)
     }
@@ -39,9 +41,9 @@ export default function WorkspaceDetail() {
     fetchData()
   }, [id, user])
 
-  const handleCreateSession = async (title: string, paradigm: string, maxRounds: number, roleIds: string[]) => {
+  const handleCreateSession = async (title: string, paradigm: string, maxRounds: number, roleIds: string[], roleBindings?: Array<{role_id: string, model_override?: any}>, topic?: string) => {
     if (!user || !id) return
-    const resp = await api.createSession(user.id, id, title, paradigm, maxRounds, roleIds)
+    const resp = await api.createSession(user.id, id, title, paradigm, maxRounds, roleIds, roleBindings, topic)
     const newSession = resp.session || resp
     setSessions(prev => [newSession, ...prev])
   }

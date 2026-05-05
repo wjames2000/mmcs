@@ -4,8 +4,12 @@ package model_gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/wjames2000/mmcs/config"
 )
@@ -58,6 +62,7 @@ type Gateway struct {
 	factories map[string]ProviderFactory
 	instances map[string]ChatModel
 	configs   map[string]config.ProviderConfig
+	Store     *ProviderStore
 }
 
 // NewGateway 创建模型网关
@@ -66,12 +71,24 @@ func NewGateway(cfg *config.ModelGatewayConfig) *Gateway {
 		factories: make(map[string]ProviderFactory),
 		instances: make(map[string]ChatModel),
 		configs:   make(map[string]config.ProviderConfig),
+		Store:     NewProviderStore(),
 	}
 
 	// 存储配置
 	for name, providerCfg := range cfg.Providers {
 		if providerCfg.Enabled {
 			g.configs[name] = providerCfg
+
+			// 同时导入到 Store 中
+			ctx := context.Background()
+			_ = g.Store.Create(ctx, &ModelProvider{
+				Name:         name,
+				Provider:     name,
+				APIKey:       providerCfg.APIKey,
+				BaseURL:      providerCfg.BaseURL,
+				DefaultModel: providerCfg.DefaultModel,
+				Enabled:      providerCfg.Enabled,
+			})
 		}
 	}
 
@@ -134,4 +151,107 @@ func (g *Gateway) ListProviders() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// ListModelProviders 返回所有模型提供商配置（委托给 Store）
+func (g *Gateway) ListModelProviders() []*ModelProvider {
+	ctx := context.Background()
+	return g.Store.List(ctx)
+}
+
+// CreateModelProvider 创建新的模型提供商配置
+func (g *Gateway) CreateModelProvider(p *ModelProvider) error {
+	ctx := context.Background()
+	return g.Store.Create(ctx, p)
+}
+
+// UpdateModelProvider 更新模型提供商配置
+func (g *Gateway) UpdateModelProvider(p *ModelProvider) error {
+	ctx := context.Background()
+	return g.Store.Update(ctx, p)
+}
+
+// DeleteModelProvider 删除模型提供商配置
+func (g *Gateway) DeleteModelProvider(id string) error {
+	ctx := context.Background()
+	return g.Store.Delete(ctx, id)
+}
+
+// ToggleModelProvider 切换模型提供商启用/禁用状态
+func (g *Gateway) ToggleModelProvider(id string) error {
+	ctx := context.Background()
+	return g.Store.ToggleEnabled(ctx, id)
+}
+
+// providerModelsResponse OpenAI 兼容的 /v1/models 响应
+type providerModelsResponse struct {
+	Object string               `json:"object"`
+	Data   []providerModelEntry `json:"data"`
+}
+
+type providerModelEntry struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+
+// RefreshModelsFromProvider 调用指定提供商的 /v1/models API，返回可用模型 ID 列表
+func (g *Gateway) RefreshModelsFromProvider(providerName string) ([]string, error) {
+	ctx := context.Background()
+	providers := g.Store.List(ctx)
+
+	var baseURL string
+	for _, p := range providers {
+		if p.Name == providerName || p.Provider == providerName {
+			baseURL = p.BaseURL
+			break
+		}
+	}
+
+	if baseURL == "" {
+		// 回退到配置文件
+		g.mu.RLock()
+		cfg, ok := g.configs[providerName]
+		g.mu.RUnlock()
+		if !ok {
+			return nil, fmt.Errorf("未找到提供商: %s", providerName)
+		}
+		baseURL = cfg.BaseURL
+	}
+
+	// 构造 /v1/models 请求
+	modelsURL := baseURL
+	if modelsURL[len(modelsURL)-1] != '/' {
+		modelsURL += "/"
+	}
+	modelsURL += "v1/models"
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("创建请求失败: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求模型列表失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("获取模型列表失败 (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	var modelsResp providerModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&modelsResp); err != nil {
+		return nil, fmt.Errorf("解析模型列表响应失败: %w", err)
+	}
+
+	modelIDs := make([]string, 0, len(modelsResp.Data))
+	for _, m := range modelsResp.Data {
+		modelIDs = append(modelIDs, m.ID)
+	}
+	return modelIDs, nil
 }

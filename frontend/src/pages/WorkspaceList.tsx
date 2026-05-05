@@ -32,8 +32,14 @@ export default function WorkspaceList() {
 
   const handleCreate = async (name: string, description: string, mode: string) => {
     if (!user) return
-    const ws = await api.createWorkspace(user.id, name, description, mode)
-    setWorkspaces(prev => [ws, ...prev])
+    try {
+      const ws = await api.createWorkspace(user.id, name, description, mode)
+      if (!ws || !ws.id) throw new Error('返回数据异常')
+      setWorkspaces(prev => [ws, ...prev])
+    } catch (err: any) {
+      console.error('[WorkspaceList] createWorkspace error:', err)
+      throw new Error(typeof err === 'string' ? err : err.message || JSON.stringify(err))
+    }
   }
 
   return (

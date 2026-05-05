@@ -34,6 +34,7 @@ type Dependencies struct {
 	ValidationService   *validation.Service
 	HealthHandler       *HealthHandler
 	MetricsHandler      MetricsHandler
+	MaterialStore       *session.MaterialStore
 }
 
 // NewRouter 创建并注册所有路由
@@ -46,7 +47,7 @@ func NewRouter(deps *Dependencies) http.Handler {
 	authHandler := NewAuthHandler(deps.UserService)
 	workspaceHandler := NewWorkspaceHandler(deps.WorkspaceService, deps.TaskService)
 	roleHandler := NewRoleHandler(deps.RoleService)
-	sessionHandler := NewSessionHandler(deps.SessionService, deps.OrchestratorFactory, deps.HubRegistry)
+	sessionHandler := NewSessionHandler(deps.SessionService, deps.OrchestratorFactory, deps.HubRegistry, deps.MaterialStore)
 	agentHandler := NewAgentHandler(deps.AgentExecutor)
 	taskHandler := NewTaskHandler(deps.TaskService, deps.SessionService)
 
@@ -99,6 +100,15 @@ func NewRouter(deps *Dependencies) http.Handler {
 	mux.Handle("POST /api/v1/sessions/{id}/pause", rl.Limit(middleware.PanicRecovery(sessionAuth(http.HandlerFunc(sessionHandler.Pause)))))
 	mux.Handle("POST /api/v1/sessions/{id}/resume", rl.Limit(middleware.PanicRecovery(sessionAuth(http.HandlerFunc(sessionHandler.Resume)))))
 	mux.Handle("POST /api/v1/sessions/{id}/terminate", rl.Limit(middleware.PanicRecovery(sessionAuth(http.HandlerFunc(sessionHandler.Terminate)))))
+	mux.Handle("GET /api/v1/sessions/{id}/minutes", rl.Limit(middleware.PanicRecovery(sessionAuth(http.HandlerFunc(sessionHandler.GetMinutes)))))
+	mux.Handle("POST /api/v1/sessions/restart", rl.Limit(middleware.PanicRecovery(sessionAuth(http.HandlerFunc(sessionHandler.Restart)))))
+	mux.Handle("GET /api/v1/sessions/{sessionId}/merged-minutes", rl.Limit(middleware.PanicRecovery(sessionAuth(http.HandlerFunc(sessionHandler.GetMergedMinutes)))))
+
+	// ===== 会议材料（需 JWT） =====
+	materialAuth := deps.AuthMiddleware.Authenticate
+	mux.Handle("POST /api/v1/sessions/{sessionId}/materials", rl.Limit(middleware.PanicRecovery(materialAuth(http.HandlerFunc(sessionHandler.UploadMaterial)))))
+	mux.Handle("GET /api/v1/sessions/{sessionId}/materials", rl.Limit(middleware.PanicRecovery(materialAuth(http.HandlerFunc(sessionHandler.ListMaterials)))))
+	mux.Handle("DELETE /api/v1/materials/{id}", rl.Limit(middleware.PanicRecovery(materialAuth(http.HandlerFunc(sessionHandler.DeleteMaterial)))))
 
 	// ===== SSE 流式推送（无需 JWT，使用 token 参数） =====
 	mux.Handle("GET /api/v1/sessions/{id}/stream", rl.Limit(middleware.PanicRecovery(http.HandlerFunc(sessionHandler.Stream))))

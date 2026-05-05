@@ -2,6 +2,7 @@ import type { MeetingMinutes } from '../../types'
 import DecisionList from './DecisionList'
 import ScoreMatrix from './ScoreMatrix'
 import ReasoningChain from './ReasoningChain'
+import MaterialList from './MaterialList'
 import { PARADIGM_LABELS, PARADIGM_ICONS } from '../../styles/colors'
 
 interface Props {
@@ -57,6 +58,11 @@ export default function MinutesView({ minutes, loading }: Props) {
           <h3 className="text-sm font-semibold text-blue-800 mb-2">📝 讨论结论</h3>
           <p className="text-sm text-blue-700 whitespace-pre-wrap">{minutes.conclusion}</p>
         </div>
+      )}
+
+      {/* Attachments */}
+      {minutes.materials && minutes.materials.length > 0 && (
+        <MaterialList materials={minutes.materials} />
       )}
     </div>
   )

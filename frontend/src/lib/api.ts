@@ -3,6 +3,8 @@
  * 自动检测 Wails 桌面环境或浏览器 HTTP 环境
  */
 
+import type { Material, ModelProvider, CreateModelProviderReq } from '../types'
+
 const isWails = typeof window !== 'undefined' && !!(window as any).go?.main?.App
 const API_BASE = 'http://localhost:8080/api/v1'
 
@@ -143,9 +145,20 @@ export const api = {
     return httpCall<any[]>('GET', `/workspaces/${workspaceId}/sessions`)
   },
 
-  createSession: async (creatorId: string, workspaceId: string, title: string, paradigm: string, maxRounds: number, roleIds: string[]) => {
-    if (isWails) return wailsCall<any>('CreateSession', creatorId, workspaceId, title, paradigm, maxRounds, roleIds)
-    return httpCall<any>('POST', '/sessions', { workspace_id: workspaceId, title, paradigm, max_rounds: maxRounds, role_ids: roleIds })
+  createSession: async (creatorId: string, workspaceId: string, title: string, paradigm: string, maxRounds: number, roleIds: string[], roleBindings?: Array<{role_id: string, model_override?: any}>, topic?: string) => {
+    if (isWails) return wailsCall<any>('CreateSession', creatorId, workspaceId, title, topic || '', paradigm, maxRounds, roleIds, JSON.stringify(roleBindings || []))
+    return httpCall<any>('POST', '/sessions', { workspace_id: workspaceId, title, topic, paradigm, max_rounds: maxRounds, role_ids: roleIds, role_bindings: roleBindings })
+  },
+
+  addSessionRole: async (sessionId: string, roleId: string, modelOverride?: any) => {
+    const overrideJson = modelOverride ? JSON.stringify(modelOverride) : ''
+    if (isWails) return wailsCall<void>('AddSessionRole', sessionId, roleId, overrideJson)
+    return httpCall<void>('POST', `/sessions/${sessionId}/roles`, { role_id: roleId, model_override: modelOverride })
+  },
+
+  removeSessionRole: async (sessionId: string, roleId: string) => {
+    if (isWails) return wailsCall<void>('RemoveSessionRole', sessionId, roleId)
+    return httpCall<void>('DELETE', `/sessions/${sessionId}/roles/${roleId}`)
   },
 
   getSessionDetail: async (id: string) => {
@@ -225,9 +238,89 @@ export const api = {
     return httpCall<any>('GET', `/tasks/${id}`)
   },
 
+  // ---- Minutes ----
+  getSessionMinutes: async (sessionId: string) => {
+    if (isWails) return wailsCall<any>('GetSessionMinutes', sessionId)
+    return httpCall<any>('GET', `/sessions/${sessionId}/minutes`)
+  },
+
+  // ---- Material ----
+  uploadSessionMaterial: async (sessionId: string, fileName: string, mimeType: string, base64Data: string) => {
+    if (isWails) return wailsCall<Material>('UploadSessionMaterial', sessionId, fileName, mimeType, base64Data)
+    return httpCall<Material>('POST', `/sessions/${sessionId}/materials`, { file_name: fileName, mime_type: mimeType, data: base64Data })
+  },
+
+  getSessionMaterials: async (sessionId: string) => {
+    if (isWails) return wailsCall<Material[]>('GetSessionMaterials', sessionId)
+    return httpCall<Material[]>('GET', `/sessions/${sessionId}/materials`)
+  },
+
+  deleteSessionMaterial: async (materialId: string) => {
+    if (isWails) return wailsCall<void>('DeleteSessionMaterial', materialId)
+    return httpCall<void>('DELETE', `/materials/${materialId}`)
+  },
+
   // ---- Model ----
   getModels: async () => {
     if (isWails) return wailsCall<string[]>('GetModels')
     return httpCall<string[]>('GET', '/models')
+  },
+
+  getModelProviders: async () => {
+    if (isWails) return wailsCall<ModelProvider[]>('GetModelProviders')
+    return httpCall<ModelProvider[]>('GET', '/models/providers')
+  },
+
+  createModelProvider: async (data: CreateModelProviderReq) => {
+    if (isWails) return wailsCall<void>('CreateModelProvider', data.name, data.provider, data.api_key, data.base_url, data.default_model)
+    return httpCall<void>('POST', '/models/providers', data)
+  },
+
+  updateModelProvider: async (id: string, data: CreateModelProviderReq) => {
+    if (isWails) return wailsCall<void>('UpdateModelProvider', id, data.name, data.provider, data.api_key, data.base_url, data.default_model)
+    return httpCall<void>('PUT', `/models/providers/${id}`, data)
+  },
+
+  deleteModelProvider: async (id: string) => {
+    if (isWails) return wailsCall<void>('DeleteModelProvider', id)
+    return httpCall<void>('DELETE', `/models/providers/${id}`)
+  },
+
+  toggleModelProvider: async (id: string) => {
+    if (isWails) return wailsCall<void>('ToggleModelProvider', id)
+    return httpCall<void>('POST', `/models/providers/${id}/toggle`)
+  },
+
+  refreshModelsFromProvider: async (providerName: string) => {
+    if (isWails) return wailsCall<string[]>('RefreshModelsFromProvider', providerName)
+    return httpCall<string[]>('GET', `/models/refresh/${providerName}`)
+  },
+
+  // ---- Restart Session ----
+  restartSession: async (sessionId: string, creatorId: string, title: string, topic: string, roleIds: string[], roleBindings?: Array<{role_id: string, model_override?: any}>) => {
+    if (isWails) return wailsCall<any>('RestartSession', sessionId, creatorId, title, topic, roleIds, JSON.stringify(roleBindings || []))
+    return httpCall<any>('POST', '/sessions/restart', { original_session_id: sessionId, creator_id: creatorId, title, topic, role_ids: roleIds, role_bindings: roleBindings })
+  },
+
+  getMergedMinutes: async (newSessionId: string, originalSessionId: string) => {
+    if (isWails) return wailsCall<any>('GetMergedMinutes', newSessionId, originalSessionId)
+    return httpCall<any>('GET', `/sessions/${newSessionId}/merged-minutes?original=${originalSessionId}`)
+  },
+
+  // ---- Session Messages ----
+  getSessionMessages: async (sessionId: string) => {
+    if (isWails) return wailsCall<any[]>('GetSessionMessages', sessionId)
+    return httpCall<any[]>('GET', `/sessions/${sessionId}/messages`)
+  },
+
+  // ---- Archive/Delete ----
+  archiveSession: async (sessionId: string) => {
+    if (isWails) return wailsCall<void>('ArchiveSession', sessionId)
+    return httpCall<void>('POST', `/sessions/${sessionId}/archive`)
+  },
+
+  deleteSession: async (sessionId: string) => {
+    if (isWails) return wailsCall<void>('DeleteSession', sessionId)
+    return httpCall<void>('DELETE', `/sessions/${sessionId}`)
   },
 }

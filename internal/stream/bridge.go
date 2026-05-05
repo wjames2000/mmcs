@@ -10,7 +10,7 @@ import (
 
 // GraphEvent Graph 运行时事件
 type GraphEvent struct {
-	Type      string      `json:"type"` // node_start / node_end / agent_speak / moderator_eval / error
+	Type      string      `json:"type"` // round_start / node_start / node_end / agent_speak / moderator_eval / error
 	NodeName  string      `json:"node_name,omitempty"`
 	RoleName  string      `json:"role_name,omitempty"`
 	Content   string      `json:"content,omitempty"`
@@ -114,14 +114,18 @@ func (b *Bridge) graphEventToSSE(ge *GraphEvent) *Event {
 
 	eventType := ge.Type
 	switch ge.Type {
-	case "node_start":
-		eventType = "node_start"
+	case "round_start", "node_start":
+		eventType = "round.start"
 	case "node_end":
-		eventType = "node_end"
-	case "agent_speak":
-		eventType = "message"
+		if ge.RoleName != "" {
+			eventType = "role.done"
+		} else {
+			eventType = "round.eval"
+		}
+	case "agent_speak", "moderator_speech":
+		eventType = "role.speak"
 	case "moderator_eval":
-		eventType = "evaluation"
+		eventType = "round.eval"
 	case "error":
 		eventType = "error"
 	}

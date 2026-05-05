@@ -21,6 +21,9 @@ type FreeChatConfig struct {
 	// InterruptCh 和 ResumeCh 用于支持人类介入（Pause/Resume）
 	InterruptCh chan *session.InterruptSignal `json:"-"`
 	ResumeCh    chan *session.ResumeSignal    `json:"-"`
+
+	// MsgStore 消息持久化存储（可选）
+	MsgStore *session.MessageStore `json:"-"`
 }
 
 // FreeChatOrchestrator 自由群聊范式编排器
@@ -81,6 +84,9 @@ func (f *FreeChatOrchestrator) Execute(
 	if config.InterruptCh != nil && config.ResumeCh != nil {
 		state.SetInterruptChannels(config.InterruptCh, config.ResumeCh)
 	}
+	if config.MsgStore != nil {
+		state.SetMessageStore(config.MsgStore)
+	}
 
 	// 推送开始事件
 	if bridge != nil {
@@ -99,6 +105,9 @@ func (f *FreeChatOrchestrator) Execute(
 	}
 
 	supervisorModel := roleContexts[0].ChatModel
+	// 如果主持人模型不可用，模拟模式下所有角色都会使用模拟发言
+	// selectNextSpeaker 将使用第一个角色的模拟 ID
+	isSimulated := supervisorModel == nil
 
 	// 3. 自由群聊主循环
 	for round := 1; round <= config.MaxRounds; round++ {
@@ -127,10 +136,16 @@ func (f *FreeChatOrchestrator) Execute(
 		topic := f.buildDiscussionContext(config.Topic, state, round)
 
 		// 4b. 主持人分析并选择发言人
-		selectedRoleID, err := f.selectNextSpeaker(ctx, supervisorModel, roleContexts, topic, state)
-		if err != nil {
-			log.Warn().Err(err).Str("session_id", sessionID).Int("round", round).Msg("选择发言人失败，跳过本轮")
-			continue
+		var selectedRoleID string
+		if isSimulated {
+			// 模拟模式：轮流选择角色
+			selectedRoleID = roleContexts[(round-1)%len(roleContexts)].Role.ID
+		} else {
+			selectedRoleID, err = f.selectNextSpeaker(ctx, supervisorModel, roleContexts, topic, state)
+			if err != nil {
+				log.Warn().Err(err).Str("session_id", sessionID).Int("round", round).Msg("选择发言人失败，跳过本轮")
+				continue
+			}
 		}
 
 		log.Debug().Str("session_id", sessionID).Int("round", round).Str("speaker", selectedRoleID).Msg("选定发言人")
@@ -159,27 +174,42 @@ func (f *FreeChatOrchestrator) Execute(
 		}
 
 		// 4c. 选中的角色发言
-		speakResult, err := selectedRC.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
-			Messages: f.buildRoleMessages(selectedRC, topic, state),
-		})
-		if err != nil {
-			log.Error().Err(err).Str("role", selectedRC.Role.Name).Msg("发言人发言失败")
-			if bridge != nil {
-				_ = bridge.Push(&stream.GraphEvent{
-					Type:      "error",
-					NodeName:  "free_chat_speak",
-					RoleName:  selectedRC.Role.Name,
-					Error:     err.Error(),
-					Timestamp: time.Now(),
-				})
+		var speakResp *model_gateway.ChatResponse
+		if selectedRC.ChatModel == nil {
+			simulated := generateSimulatedOpinion(selectedRC.Role, config.Topic, round, state.GetHistory())
+			speakResp = &model_gateway.ChatResponse{
+				Content:     simulated,
+				TotalTokens: len(simulated) / 4,
+				Model:       "simulated",
 			}
-			continue
+			select {
+			case <-time.After(300 * time.Millisecond):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		} else {
+			speakResp, err = selectedRC.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
+				Messages: f.buildRoleMessages(selectedRC, topic, state),
+			})
+			if err != nil {
+				log.Error().Err(err).Str("role", selectedRC.Role.Name).Msg("发言人发言失败")
+				if bridge != nil {
+					_ = bridge.Push(&stream.GraphEvent{
+						Type:      "error",
+						NodeName:  "free_chat_speak",
+						RoleName:  selectedRC.Role.Name,
+						Error:     err.Error(),
+						Timestamp: time.Now(),
+					})
+				}
+				continue
+			}
 		}
 
 		// 添加到历史
 		state.AddHistory(&model_gateway.ChatMessage{
 			Role:    "assistant",
-			Content: speakResult.Content,
+			Content: speakResp.Content,
 		})
 
 		// 推送发言事件
@@ -188,7 +218,7 @@ func (f *FreeChatOrchestrator) Execute(
 				Type:      "agent_speak",
 				NodeName:  "free_chat_speak",
 				RoleName:  selectedRC.Role.Name,
-				Content:   speakResult.Content,
+				Content:   speakResp.Content,
 				Timestamp: time.Now(),
 			})
 			_ = bridge.Push(&stream.GraphEvent{
@@ -200,7 +230,7 @@ func (f *FreeChatOrchestrator) Execute(
 		}
 
 		log.Debug().Str("role", selectedRC.Role.Name).Int("round", round).
-			Int("tokens", speakResult.TotalTokens).Msg("发言完成")
+			Int("tokens", speakResp.TotalTokens).Msg("发言完成")
 
 		// 4d. 主持人评估是否继续
 		evalResult := f.moderatorEvalNode.Evaluate(state)

@@ -13,19 +13,21 @@ import (
 
 // Session 会话模型
 type Session struct {
-	ID           string          `json:"id"`
-	WorkspaceID  string          `json:"workspace_id"`
-	Title        string          `json:"title"`
-	Paradigm     string          `json:"paradigm"`
-	Status       string          `json:"status"`
-	MaxRounds    int             `json:"max_rounds"`
-	RoundTimeout int             `json:"round_timeout"`
-	Config       json.RawMessage `json:"config"`
-	CreatorID    string          `json:"creator_id"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
-	StartedAt    *time.Time      `json:"started_at,omitempty"`
-	EndedAt      *time.Time      `json:"ended_at,omitempty"`
+	ID              string          `json:"id"`
+	WorkspaceID     string          `json:"workspace_id"`
+	Title           string          `json:"title"`
+	Topic           *string         `json:"topic,omitempty"` // 讨论主题/背景描述
+	Paradigm        string          `json:"paradigm"`
+	Status          string          `json:"status"`
+	MaxRounds       int             `json:"max_rounds"`
+	RoundTimeout    int             `json:"round_timeout"`
+	Config          json.RawMessage `json:"config"`
+	CreatorID       string          `json:"creator_id"`
+	ParentSessionID *string         `json:"parent_session_id,omitempty"` // 重启时指向原会话 ID
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	StartedAt       *time.Time      `json:"started_at,omitempty"`
+	EndedAt         *time.Time      `json:"ended_at,omitempty"`
 }
 
 // SessionRole 会话角色绑定
@@ -49,11 +51,11 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 
 // Create 创建会话
 func (r *Repository) Create(ctx context.Context, s *Session) error {
-	query := `INSERT INTO sessions (id, workspace_id, title, paradigm, status, max_rounds, round_timeout, config, creator_id, created_at, updated_at)
-	           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+	query := `INSERT INTO sessions (id, workspace_id, title, topic, paradigm, status, max_rounds, round_timeout, config, creator_id, parent_session_id, created_at, updated_at)
+	           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 	_, err := r.pool.Exec(ctx, query,
-		s.ID, s.WorkspaceID, s.Title, s.Paradigm, s.Status,
-		s.MaxRounds, s.RoundTimeout, s.Config, s.CreatorID, s.CreatedAt, s.UpdatedAt,
+		s.ID, s.WorkspaceID, s.Title, s.Topic, s.Paradigm, s.Status,
+		s.MaxRounds, s.RoundTimeout, s.Config, s.CreatorID, s.ParentSessionID, s.CreatedAt, s.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("创建会话失败: %w", err)
@@ -63,13 +65,13 @@ func (r *Repository) Create(ctx context.Context, s *Session) error {
 
 // GetByID 根据 ID 获取会话
 func (r *Repository) GetByID(ctx context.Context, id string) (*Session, error) {
-	query := `SELECT id, workspace_id, title, paradigm, status, max_rounds, round_timeout, config, creator_id, created_at, updated_at, started_at, ended_at
+	query := `SELECT id, workspace_id, title, topic, paradigm, status, max_rounds, round_timeout, config, creator_id, parent_session_id, created_at, updated_at, started_at, ended_at
 	           FROM sessions WHERE id = $1`
 	s := &Session{}
 	var config []byte
 	err := r.pool.QueryRow(ctx, query, id).Scan(
-		&s.ID, &s.WorkspaceID, &s.Title, &s.Paradigm, &s.Status,
-		&s.MaxRounds, &s.RoundTimeout, &config, &s.CreatorID,
+		&s.ID, &s.WorkspaceID, &s.Title, &s.Topic, &s.Paradigm, &s.Status,
+		&s.MaxRounds, &s.RoundTimeout, &config, &s.CreatorID, &s.ParentSessionID,
 		&s.CreatedAt, &s.UpdatedAt, &s.StartedAt, &s.EndedAt,
 	)
 	if err != nil {
@@ -121,9 +123,9 @@ func (r *Repository) UpdateStatus(ctx context.Context, id, status string, extra 
 
 // Update 更新会话信息
 func (r *Repository) Update(ctx context.Context, s *Session) error {
-	query := `UPDATE sessions SET title = $2, max_rounds = $3, config = $4, updated_at = NOW()
+	query := `UPDATE sessions SET title = $2, topic = $3, max_rounds = $4, config = $5, updated_at = NOW()
 	           WHERE id = $1`
-	_, err := r.pool.Exec(ctx, query, s.ID, s.Title, s.MaxRounds, s.Config)
+	_, err := r.pool.Exec(ctx, query, s.ID, s.Title, s.Topic, s.MaxRounds, s.Config)
 	if err != nil {
 		return fmt.Errorf("更新会话失败: %w", err)
 	}
@@ -132,7 +134,7 @@ func (r *Repository) Update(ctx context.Context, s *Session) error {
 
 // ListByWorkspace 获取工作区下的会话列表
 func (r *Repository) ListByWorkspace(ctx context.Context, workspaceID string) ([]*Session, error) {
-	query := `SELECT id, workspace_id, title, paradigm, status, max_rounds, round_timeout, config, creator_id, created_at, updated_at, started_at, ended_at
+	query := `SELECT id, workspace_id, title, topic, paradigm, status, max_rounds, round_timeout, config, creator_id, parent_session_id, created_at, updated_at, started_at, ended_at
 	           FROM sessions WHERE workspace_id = $1 ORDER BY created_at DESC`
 	rows, err := r.pool.Query(ctx, query, workspaceID)
 	if err != nil {
@@ -145,8 +147,8 @@ func (r *Repository) ListByWorkspace(ctx context.Context, workspaceID string) ([
 		s := &Session{}
 		var config []byte
 		if err := rows.Scan(
-			&s.ID, &s.WorkspaceID, &s.Title, &s.Paradigm, &s.Status,
-			&s.MaxRounds, &s.RoundTimeout, &config, &s.CreatorID,
+			&s.ID, &s.WorkspaceID, &s.Title, &s.Topic, &s.Paradigm, &s.Status,
+			&s.MaxRounds, &s.RoundTimeout, &config, &s.CreatorID, &s.ParentSessionID,
 			&s.CreatedAt, &s.UpdatedAt, &s.StartedAt, &s.EndedAt,
 		); err != nil {
 			return nil, fmt.Errorf("扫描会话行失败: %w", err)
@@ -197,7 +199,14 @@ func (r *Repository) GetSessionRoles(ctx context.Context, sessionID string) ([]*
 	return roles, nil
 }
 
-// RemoveSessionRole 移除会话角色绑定
+// Delete 硬删除会话
+func (r *Repository) Delete(ctx context.Context, id string) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM sessions WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("删除会话失败: %w", err)
+	}
+	return nil
+}
 func (r *Repository) RemoveSessionRole(ctx context.Context, sessionID, roleID string) error {
 	query := `DELETE FROM session_roles WHERE session_id = $1 AND role_id = $2`
 	_, err := r.pool.Exec(ctx, query, sessionID, roleID)

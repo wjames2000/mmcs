@@ -42,6 +42,11 @@ export default function SessionCard({ session, workspaceId }: Props) {
     return diff > 0 ? `${diff} 分钟` : '刚刚开始'
   }
 
+  const formatTime = (t: string) => {
+    const d = new Date(t)
+    return `${d.getMonth()+1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`
+  }
+
   return (
     <div
       className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-sm hover:border-blue-200 cursor-pointer transition-all"
@@ -77,6 +82,11 @@ export default function SessionCard({ session, workspaceId }: Props) {
         <span>{PARADIGM_LABELS[session.paradigm] || session.paradigm}</span>
         {session.started_at && <span>{formatDuration()}</span>}
         <span>最大 {session.max_rounds} 轮</span>
+      </div>
+
+      <div className="flex items-center gap-3 text-xs text-gray-400">
+        <span>开始: {session.started_at ? formatTime(session.started_at) : '-'}</span>
+        <span>结束: {session.ended_at ? formatTime(session.ended_at) : '-'}</span>
       </div>
 
       {session.status === 'ended' && (

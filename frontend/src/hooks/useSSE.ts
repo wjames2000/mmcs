@@ -5,8 +5,10 @@ interface UseSSEResult {
   messages: StreamMessage[]
   status: string
   isConnected: boolean
+  currentRound: number
   clearMessages: () => void
   addMessage: (msg: StreamMessage) => void
+  setMessages: React.Dispatch<React.SetStateAction<StreamMessage[]>>
 }
 
 /**
@@ -18,11 +20,13 @@ export function useSSE(sessionId: string | null): UseSSEResult {
   const [messages, setMessages] = useState<StreamMessage[]>([])
   const [status, setStatus] = useState<string>('')
   const [isConnected, setIsConnected] = useState(false)
+  const [currentRound, setCurrentRound] = useState(0)
   const eventSourceRef = useRef<EventSource | null>(null)
   const unlistenRef = useRef<(() => void) | null>(null)
 
   const clearMessages = useCallback(() => {
     setMessages([])
+    setCurrentRound(0)
   }, [])
 
   const addMessage = useCallback((msg: StreamMessage) => {
@@ -45,6 +49,13 @@ export function useSSE(sessionId: string | null): UseSSEResult {
     }
 
     switch (eventType) {
+      case 'round.start':
+        // 从 node_name 提取轮次号，如 "round_3"
+        const roundMatch = payload?.node_name?.match(/round_(\d+)/)
+        if (roundMatch) {
+          setCurrentRound(parseInt(roundMatch[1]))
+        }
+        break
       case 'session.starting':
         setStatus('starting')
         break
@@ -101,36 +112,40 @@ export function useSSE(sessionId: string | null): UseSSEResult {
       setIsConnected(true)
     })
 
-    es.addEventListener('message', (e) => {
-      handleEvent(JSON.parse(e.data))
+    es.addEventListener('round.start', (e) => {
+      handleEvent({ ...JSON.parse(e.data), type: 'round.start' })
     })
 
-    es.addEventListener('node_start', (e) => {
-      handleEvent({ ...JSON.parse(e.data), type: 'node_start' })
+    es.addEventListener('role.speak', (e) => {
+      handleEvent({ ...JSON.parse(e.data), type: 'role.speak' })
     })
 
-    es.addEventListener('node_end', (e) => {
-      handleEvent({ ...JSON.parse(e.data), type: 'node_end' })
+    es.addEventListener('role.done', (e) => {
+      handleEvent({ ...JSON.parse(e.data), type: 'role.done' })
     })
 
-    es.addEventListener('evaluation', (e) => {
+    es.addEventListener('round.eval', (e) => {
       handleEvent({ ...JSON.parse(e.data), type: 'round.eval' })
     })
 
-    es.addEventListener('session.paused', () => {
+    es.addEventListener('session.paused', (e) => {
       setStatus('paused')
+      handleEvent({ ...JSON.parse(e.data), type: 'session.paused' })
     })
 
-    es.addEventListener('session.resumed', () => {
+    es.addEventListener('session.resumed', (e) => {
       setStatus('running')
+      handleEvent({ ...JSON.parse(e.data), type: 'session.resumed' })
     })
 
-    es.addEventListener('session.ended', () => {
+    es.addEventListener('session.ended', (e) => {
       setStatus('ended')
+      handleEvent({ ...JSON.parse(e.data), type: 'session.ended' })
     })
 
-    es.addEventListener('error', (e) => {
-      console.error('SSE error:', e)
+    es.addEventListener('error', () => {
+      console.error('SSE connection error')
+      handleEvent({ type: 'error', error: 'SSE 连接错误', timestamp: new Date().toISOString() })
     })
 
     es.onerror = () => {
@@ -144,5 +159,5 @@ export function useSSE(sessionId: string | null): UseSSEResult {
     }
   }, [sessionId, handleEvent])
 
-  return { messages, status, isConnected, clearMessages, addMessage }
+  return { messages, status, isConnected, currentRound, clearMessages, addMessage, setMessages }
 }

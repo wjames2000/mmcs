@@ -169,12 +169,12 @@ func TestCourtOrchestrator_WithBridgeEvents(t *testing.T) {
 	// 等待事件推送完成
 	time.Sleep(100 * time.Millisecond)
 
-	// 应该有 node_start 事件
+	// 应该有 round.start 事件
 	select {
 	case event := <-sub.Events:
-		assert.Equal(t, "node_start", event.Type)
+		assert.Equal(t, "round.start", event.Type)
 	case <-time.After(500 * time.Millisecond):
-		t.Error("期望收到 node_start 事件，但未收到")
+		t.Error("期望收到 round.start 事件，但未收到")
 	}
 
 	hub.Unsubscribe("court-test-sub")

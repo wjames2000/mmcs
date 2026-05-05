@@ -2,6 +2,7 @@ package role
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -72,6 +73,42 @@ func (r *SkillRegistry) registerDefaults() {
 
 请用数据说话，给出优化前后的预期效果对比。`,
 		},
+		{
+			Name:        "hotel-marketing",
+			Description: "酒店市场营销策略",
+			Prompt: `你是酒店市场营销专家。请从以下维度提供建议：
+1. 品牌定位与差异化策略
+2. 目标客群分析与分层
+3. 数字营销渠道优化（SEO/SEM/社交媒体）
+4. 宾客体验全链路设计
+5. 竞品分析与市场趋势
+
+每个建议需附带预期的 ROI 评估和实施优先级。`,
+		},
+		{
+			Name:        "hotel-sales",
+			Description: "酒店销售与收益管理",
+			Prompt: `你是酒店销售与收益管理专家。请从以下维度分析：
+1. 收入最大化策略（动态定价、套餐设计）
+2. 渠道管理与优化
+3. 大客户关系管理
+4. 销售团队绩效提升
+5. 季节性需求管理
+
+给出具体的可量化目标和执行方案。`,
+		},
+		{
+			Name:        "corporate-governance",
+			Description: "企业治理与战略决策",
+			Prompt: `你是企业治理与战略决策顾问。请从以下角度评估：
+1. 战略方向与长期价值
+2. 风险识别与合规要求
+3. 投资回报与资源分配
+4. 利益相关方影响分析
+5. 治理结构与决策流程
+
+关注长期可持续发展而非短期收益。`,
+		},
 	}
 
 	for _, s := range defaults {
@@ -104,7 +141,7 @@ func (r *SkillRegistry) Get(name string) (*SkillDefinition, error) {
 	return skill, nil
 }
 
-// GetAll 获取所有技能
+// GetAll 获取所有技能（按 Name 排序，保证返回顺序稳定）
 func (r *SkillRegistry) GetAll() []*SkillDefinition {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -113,6 +150,9 @@ func (r *SkillRegistry) GetAll() []*SkillDefinition {
 	for _, s := range r.skills {
 		result = append(result, s)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
 	return result
 }
 

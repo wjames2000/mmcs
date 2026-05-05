@@ -10,13 +10,18 @@ export interface User {
 }
 
 export interface LoginResponse {
+  access_token: string
+  refresh_token: string
+  expires_in: number
+  token_type: string
   user: User
-  token: string
 }
 
 export interface RegisterResponse {
-  user: User
-  token: string
+  id: string
+  name: string
+  email: string
+  created_at: string
 }
 
 // ==================== Workspace ====================
@@ -37,12 +42,14 @@ export interface Session {
   id: string
   workspace_id: string
   title: string
+  topic?: string
   paradigm: 'round_robin' | 'court' | 'evaluation' | 'free_chat'
   status: 'draft' | 'running' | 'paused' | 'ended' | 'failed'
   max_rounds: number
   round_timeout: number
   config: any
   creator_id: string
+  parent_session_id?: string
   created_at: string
   updated_at: string
   started_at?: string
@@ -113,13 +120,24 @@ export interface ValidationResult {
 
 // ==================== SSE Messages ====================
 export interface StreamMessage {
-  type: 'node_start' | 'node_end' | 'message' | 'evaluation' | 'error' | 'connected' | 'role.speak' | 'role.done' | 'round.start' | 'round.eval' | 'session.paused' | 'session.resumed' | 'session.ended'
+  type: 'node_start' | 'node_end' | 'message' | 'evaluation' | 'error' | 'connected' | 'role.speak' | 'role.done' | 'round.start' | 'round.eval' | 'session.paused' | 'session.resumed' | 'session.ended' | 'moderator_speech'
   node_name?: string
   role_name?: string
   content?: string
   metadata?: any
   timestamp: string
   error?: string
+}
+
+// ==================== Material ====================
+export interface Material {
+  id: string
+  session_id: string
+  file_name: string
+  file_size: number
+  mime_type: string
+  content?: string
+  uploaded_at: string
 }
 
 // ==================== Minutes ====================
@@ -135,6 +153,7 @@ export interface MeetingMinutes {
   disagreements: Disagreement[]
   score_matrix?: ScoreMatrix
   conclusion: string
+  materials?: Material[]
 }
 
 export interface RoundRecord {
@@ -177,10 +196,36 @@ export interface ScoreEntry {
   rationale?: string
 }
 
+// ==================== Restart / Merged Minutes ====================
+export interface MergedMinutes {
+  original_session_id: string
+  new_session_id: string
+  original_title: string
+  new_title: string
+  original_minutes?: MeetingMinutes
+  new_minutes?: MeetingMinutes
+  merged_decisions: Decision[]
+  merged_conclusion: string
+  merged_materials?: Material[]
+}
+
 // ==================== Model ====================
 export interface ModelProvider {
+  id: string
   name: string
+  provider: string
+  api_key: string
+  base_url: string
+  default_model: string
   enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateModelProviderReq {
+  name: string
+  provider: string
+  api_key: string
   base_url: string
   default_model: string
 }

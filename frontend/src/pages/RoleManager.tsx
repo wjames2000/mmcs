@@ -33,8 +33,12 @@ export default function RoleManager() {
 
   const handleCreate = async (data: any) => {
     if (!user) return
-    const newRole = await api.createRole(user.id, data)
-    setRoles(prev => [newRole, ...prev])
+    try {
+      const newRole = await api.createRole(user.id, data)
+      setRoles(prev => [newRole, ...prev])
+    } catch (err: any) {
+      throw new Error(err.message || '创建角色失败')
+    }
   }
 
   const handleUpdate = async (data: any, roleId?: string) => {

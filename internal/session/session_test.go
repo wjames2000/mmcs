@@ -29,7 +29,8 @@ func TestValidateTransition_ValidTransitions(t *testing.T) {
 		{name: "paused→running", current: "paused", next: "running"},
 		{name: "paused→ended", current: "paused", next: "ended"},
 		{name: "paused→failed", current: "paused", next: "failed"},
-		{name: "failed→draft", current: "failed", next: "draft"},
+		{name: "ended→archived", current: "ended", next: "archived"},
+		{name: "failed→archived", current: "failed", next: "archived"},
 		// 相同状态应允许（幂等）
 		{name: "draft→draft", current: "draft", next: "draft"},
 		{name: "running→running", current: "running", next: "running"},

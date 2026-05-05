@@ -2,45 +2,41 @@ import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import MinutesView from '../components/minutes/MinutesView'
+import MergedMinutesView from '../components/minutes/MergedMinutesView'
 import { MinutesEmpty } from '../components/minutes/MinutesView'
-import type { MeetingMinutes } from '../types'
+import type { MeetingMinutes, MergedMinutes, Session } from '../types'
 
 export default function SessionMinutes() {
   const { id: sessionId } = useParams<{ id: string }>()
   const [minutes, setMinutes] = useState<MeetingMinutes | null>(null)
+  const [merged, setMerged] = useState<MergedMinutes | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // Try to build minutes from session data and messages
   const fetchMinutes = async () => {
     if (!sessionId) return
     setLoading(true)
     setError('')
     try {
-      const data = await api.getSessionDetail(sessionId)
-      const session = data.session || data
-
-      // If there were a dedicated minutes endpoint, we'd call it.
-      // For now, construct a basic minutes view from session data.
-      const participants = (data.roles || []).map((r: any) => {
-        // In Wails mode, roles may have a name property
-        return r.name || r.role_name || r.role_id
-      })
-
-      const minutesData: MeetingMinutes = {
-        session_id: session.id,
-        title: session.title,
-        paradigm: session.paradigm,
-        participants,
-        started_at: session.started_at || '',
-        ended_at: session.ended_at || '',
-        rounds: [],
-        decisions: [],
-        disagreements: [],
-        conclusion: '',
+      // First, get the session to check if it has a parent_session_id
+      let parentSessionId: string | undefined
+      try {
+        const sessionDetail = await api.getSessionDetail(sessionId)
+        const sess: Session = sessionDetail.session || sessionDetail
+        parentSessionId = sess.parent_session_id
+      } catch {
+        // Ignore - treat as normal session
       }
 
-      setMinutes(minutesData)
+      if (parentSessionId) {
+        // This is a restarted session - fetch merged minutes
+        const mergedData = await api.getMergedMinutes(sessionId, parentSessionId)
+        setMerged(mergedData)
+      } else {
+        // Normal session - fetch regular minutes
+        const data = await api.getSessionMinutes(sessionId)
+        setMinutes(data)
+      }
     } catch (err: any) {
       setError(err.message || '加载会议纪要失败')
     } finally {
@@ -67,6 +63,10 @@ export default function SessionMinutes() {
         </div>
       ) : loading ? (
         <MinutesView minutes={null as any} loading />
+      ) : merged ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <MergedMinutesView merged={merged} />
+        </div>
       ) : minutes ? (
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <MinutesView minutes={minutes} />

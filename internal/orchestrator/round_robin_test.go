@@ -219,27 +219,38 @@ func TestModeratorEvalNode_WithBridgeEvents(t *testing.T) {
 
 	node := NewModeratorEvalNode()
 	result := node.Evaluate(state)
-
 	assert.True(t, result.ShouldContinue)
 
 	// 等待所有事件推送完成
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
-	// 验证事件已推送 - 第一个事件应是 node_start
-	select {
-	case event := <-sub.Events:
-		assert.Equal(t, "node_start", event.Type)
-	case <-time.After(500 * time.Millisecond):
-		t.Error("期望收到 node_start 事件，但未收到")
+	// 从 subscriber 收集所有已发送的事件
+	var receivedEvents []*stream.Event
+	for {
+		select {
+		case ev := <-sub.Events:
+			receivedEvents = append(receivedEvents, ev)
+		default:
+			goto checkEvents
+		}
 	}
+checkEvents:
 
-	// 第二个事件应是 evaluation（桥接器将 moderator_eval 映射为 evaluation）
-	select {
-	case event := <-sub.Events:
-		assert.Equal(t, "evaluation", event.Type)
-	case <-time.After(500 * time.Millisecond):
-		t.Error("期望收到 evaluation 事件，但未收到")
+	// 验证事件已推送 - 第一个事件应是 round.start
+	if len(receivedEvents) > 0 {
+		assert.Equal(t, "round.start", receivedEvents[0].Type)
+	} else {
+		t.Error("期望收到 round.start 事件，但未收到")
 	}
+	// 验证有 round.eval 事件
+	hasRoundEval := false
+	for _, ev := range receivedEvents {
+		if ev.Type == "round.eval" {
+			hasRoundEval = true
+			break
+		}
+	}
+	assert.True(t, hasRoundEval, "期望收到 round.eval 事件")
 
 	hub.Unsubscribe("test-sub")
 }
@@ -357,7 +368,7 @@ func TestFactory_FreeChatNowSupported(t *testing.T) {
 func TestSkillRegistry_DefaultSkills(t *testing.T) {
 	reg := role.NewSkillRegistry()
 	skills := reg.GetAll()
-	assert.Equal(t, 3, len(skills))
+	assert.Equal(t, 6, len(skills)) // 3 original + 3 hotel/corporate
 
 	names := reg.ListNames()
 	assert.Contains(t, names, "security-audit")
@@ -461,9 +472,9 @@ func TestStreamBridge_EventPush(t *testing.T) {
 
 	// 验证收到事件
 	select {
-	case event := <-sub.Events:
-		assert.Equal(t, "message", event.Type)
-		assert.Contains(t, event.Data.(string), "测试内容")
+	case ev := <-sub.Events:
+		assert.Equal(t, "role.speak", ev.Type)
+		assert.Contains(t, ev.Data.(string), "测试内容")
 	case <-time.After(time.Second):
 		t.Error("等待事件超时")
 	}

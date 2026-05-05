@@ -79,6 +79,17 @@ type MeetingMinutes struct {
 	Disagreements []Disagreement `json:"disagreements"`
 	ScoreMatrix   *ScoreMatrix   `json:"score_matrix,omitempty"`
 	Conclusion    string         `json:"conclusion"`
+	Materials     []MaterialInfo `json:"materials,omitempty"` // 附件材料列表
+}
+
+// MaterialInfo 附件材料摘要（用于会议纪要展示）
+type MaterialInfo struct {
+	ID         string    `json:"id"`
+	FileName   string    `json:"file_name"`
+	FileSize   int64     `json:"file_size"`
+	MimeType   string    `json:"mime_type"`
+	Content    string    `json:"content,omitempty"` // 文本内容或 base64（用于展现/下载）
+	UploadedAt time.Time `json:"uploaded_at"`
 }
 
 // BuildMinutes 从 CallbackRecord 数组构建完整的 MeetingMinutes
