@@ -2,7 +2,6 @@ package stream
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -103,15 +102,6 @@ func (b *Bridge) EventChannel() chan<- *GraphEvent {
 
 // graphEventToSSE 将 Graph 内部事件转换为 SSE Event
 func (b *Bridge) graphEventToSSE(ge *GraphEvent) *Event {
-	data, _ := json.Marshal(map[string]interface{}{
-		"node_name": ge.NodeName,
-		"role_name": ge.RoleName,
-		"content":   ge.Content,
-		"metadata":  ge.Metadata,
-		"timestamp": ge.Timestamp,
-		"error":     ge.Error,
-	})
-
 	eventType := ge.Type
 	switch ge.Type {
 	case "round_start", "node_start":
@@ -132,6 +122,13 @@ func (b *Bridge) graphEventToSSE(ge *GraphEvent) *Event {
 
 	return &Event{
 		Type: eventType,
-		Data: string(data),
+		Data: map[string]interface{}{
+			"node_name": ge.NodeName,
+			"role_name": ge.RoleName,
+			"content":   ge.Content,
+			"metadata":  ge.Metadata,
+			"timestamp": ge.Timestamp,
+			"error":     ge.Error,
+		},
 	}
 }

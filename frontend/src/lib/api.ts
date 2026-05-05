@@ -71,14 +71,21 @@ async function httpCall<T>(method: string, path: string, body?: any): Promise<T>
   }
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(err.error || `HTTP ${res.status}`)
+    const err = await res.json().catch(() => ({ message: res.statusText }))
+    throw new Error(err.message || err.error || `HTTP ${res.status}`)
   }
 
   // 204 No Content
   if (res.status === 204) return undefined as T
 
-  return res.json()
+  const json = await res.json()
+  
+  // 统一解包 {code, data} 响应
+  if (json && typeof json === 'object' && 'code' in json && 'data' in json) {
+    return json.data as T
+  }
+  
+  return json as T
 }
 
 // ==================== 认证 Token 管理 ====================
@@ -145,9 +152,18 @@ export const api = {
     return httpCall<any[]>('GET', `/workspaces/${workspaceId}/sessions`)
   },
 
-  createSession: async (creatorId: string, workspaceId: string, title: string, paradigm: string, maxRounds: number, roleIds: string[], roleBindings?: Array<{role_id: string, model_override?: any}>, topic?: string) => {
-    if (isWails) return wailsCall<any>('CreateSession', creatorId, workspaceId, title, topic || '', paradigm, maxRounds, roleIds, JSON.stringify(roleBindings || []))
-    return httpCall<any>('POST', '/sessions', { workspace_id: workspaceId, title, topic, paradigm, max_rounds: maxRounds, role_ids: roleIds, role_bindings: roleBindings })
+  createSession: async (creatorId: string, workspaceId: string, title: string, paradigm: string, maxRounds: number, roleIds: string[], roleBindings?: Array<{role_id: string, model_override?: any}>, topic?: string, moderatorModel?: string) => {
+    if (isWails) return wailsCall<any>('CreateSession', creatorId, workspaceId, title, topic || '', paradigm, maxRounds, roleIds, JSON.stringify(roleBindings || []), moderatorModel || '')
+    return httpCall<any>('POST', '/sessions', {
+      workspace_id: workspaceId,
+      title,
+      topic,
+      paradigm,
+      max_rounds: maxRounds,
+      role_ids: roleIds,
+      role_bindings: roleBindings,
+      config: moderatorModel ? { moderator_model: moderatorModel } : undefined,
+    })
   },
 
   addSessionRole: async (sessionId: string, roleId: string, modelOverride?: any) => {

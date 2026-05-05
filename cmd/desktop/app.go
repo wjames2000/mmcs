@@ -304,10 +304,19 @@ func (a *App) GetSessions(workspaceID string) ([]*session.Session, error) {
 // roleBindingsJSON 是 JSON 字符串，如 '[{"role_id":"r1","model_override":{"provider":"openai","model_name":"gpt-4"}}]'
 // 为空字符串 "" 时使用 roleIDs 兼容旧模式
 // topic 是讨论主题/背景描述（可选，传入空字符串则不设置）
-func (a *App) CreateSession(creatorID, workspaceID, title, topic, paradigm string, maxRounds int, roleIDs []string, roleBindingsJSON string) (*session.CreateResponse, error) {
+// moderatorModel 是主持人模型绑定，如 "openai:gpt-4"（可选，传入空字符串则不设置）
+func (a *App) CreateSession(creatorID, workspaceID, title, topic, paradigm string, maxRounds int, roleIDs []string, roleBindingsJSON string, moderatorModel string) (*session.CreateResponse, error) {
 	if a.sessionSvc == nil {
 		return nil, fmt.Errorf("数据库未连接")
 	}
+
+	// 构建 session config（含主持人模型等额外配置）
+	configMap := make(map[string]interface{})
+	if moderatorModel != "" {
+		configMap["moderator_model"] = moderatorModel
+	}
+	configJSON, _ := json.Marshal(configMap)
+
 	req := &session.CreateRequest{
 		WorkspaceID: workspaceID,
 		Title:       title,
@@ -315,6 +324,7 @@ func (a *App) CreateSession(creatorID, workspaceID, title, topic, paradigm strin
 		Paradigm:    paradigm,
 		MaxRounds:   maxRounds,
 		RoleIDs:     roleIDs,
+		Config:      configJSON,
 	}
 
 	if roleBindingsJSON != "" {
@@ -458,48 +468,18 @@ func (a *App) startOrchestration(ctx context.Context, sessionID string) error {
 
 	// 提取角色 ID 和主持人配置
 	roleIDs := make([]string, len(sessionRoles))
-	var moderatorModelBinding string
-	moderatorRoleID := ""
-	moderatorRoleIndex := 0
+	var moderatorModel string
 	if sess.Config != nil {
 		var cfg struct {
-			ModeratorRoleID string `json:"moderator_role_id"`
+			ModeratorModel string `json:"moderator_model"`
 		}
 		if err := json.Unmarshal(sess.Config, &cfg); err == nil {
-			moderatorRoleID = cfg.ModeratorRoleID
+			moderatorModel = cfg.ModeratorModel
 		}
 	}
 	for i, sr := range sessionRoles {
 		roleIDs[i] = sr.RoleID
-
-		if sr.ModelOverride == nil {
-			if sr.RoleID == moderatorRoleID {
-				moderatorRoleIndex = i
-			}
-			continue
-		}
-
-		var override struct {
-			Provider    string `json:"provider"`
-			ModelName   string `json:"model_name"`
-			IsModerator bool   `json:"is_moderator"`
-		}
-		if err := json.Unmarshal(sr.ModelOverride, &override); err != nil {
-			continue
-		}
-
-		// 检测是否标记为主持人
-		if override.IsModerator || sr.RoleID == moderatorRoleID {
-			moderatorRoleIndex = i
-			if override.Provider != "" {
-				moderatorModelBinding = override.Provider
-			}
-		}
-
-		// 兼容旧逻辑：未指定主持人时，第一个角色作为主持人
-		if moderatorRoleID == "" && i == 0 && override.Provider != "" && moderatorModelBinding == "" {
-			moderatorModelBinding = override.Provider
-		}
+		_ = i
 	}
 
 	// 使用 topic 作为讨论主题描述（优先 topic，回退到 title）
@@ -523,14 +503,14 @@ func (a *App) startOrchestration(ctx context.Context, sessionID string) error {
 	switch o := orch.(type) {
 	case *orchestrator.RoundRobinOrchestrator:
 		config := &orchestrator.RoundRobinConfig{
-			RoleIDs:               roleIDs,
-			Topic:                 topic,
-			MaxRounds:             sess.MaxRounds,
-			ModeratorModelBinding: moderatorModelBinding,
-			ModeratorRoleIndex:    moderatorRoleIndex,
-			InterruptCh:           ch.InterruptCh,
-			ResumeCh:              ch.ResumeCh,
-			MsgStore:              a.messageStore,
+			RoleIDs:         roleIDs,
+			Topic:           topic,
+			MaxRounds:       sess.MaxRounds,
+			ModeratorModel:  moderatorModel,
+			ModeratorPrompt: "",
+			InterruptCh:     ch.InterruptCh,
+			ResumeCh:        ch.ResumeCh,
+			MsgStore:        a.messageStore,
 		}
 		_, execErr = o.Execute(ctx, sessionID, config, bridge, progressCh)
 

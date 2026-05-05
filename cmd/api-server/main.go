@@ -32,7 +32,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load("development")
+	cfg, err := config.Load("dev")
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "加载配置失败: %v\n", err)
 		os.Exit(1)
@@ -175,6 +175,7 @@ func main() {
 		HealthHandler:       healthHandler,
 		MetricsHandler:      mmcsmetrics.MetricsHandler(),
 		MaterialStore:       materialStore,
+		ModelGateway:        gateway,
 	}
 	handler := api.NewRouter(deps)
 

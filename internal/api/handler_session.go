@@ -137,14 +137,18 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 启动编排（异步）
+	// 启动编排（异步）- 使用独立的 context，不依赖 HTTP 请求 context
+	// 注意：不要在这里 defer cancel()，否则 HTTP 响应返回后会取消 context
+	ctx, cancel := context.WithCancel(context.Background())
+
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error().Str("session_id", id).Interface("panic", r).Msg("编排执行异常")
 			}
+			cancel() // 在 goroutine 结束时取消 context
 		}()
-		if err := h.startOrchestration(r.Context(), id); err != nil {
+		if err := h.startOrchestration(ctx, id); err != nil {
 			log.Error().Err(err).Str("session_id", id).Msg("编排启动失败")
 		}
 	}()
@@ -157,9 +161,18 @@ func (h *SessionHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 // startOrchestration 启动异步编排
 func (h *SessionHandler) startOrchestration(ctx context.Context, sessionID string) error {
+	log.Info().Str("session_id", sessionID).Msg("startOrchestration 开始")
+
+	// 检查 context 状态
+	if ctx.Err() != nil {
+		log.Error().Str("session_id", sessionID).Str("ctx_err", ctx.Err().Error()).Msg("context 已被取消")
+		return fmt.Errorf("context 已取消: %w", ctx.Err())
+	}
+
 	// 获取会话详情
 	sess, sessionRoles, err := h.sessionService.GetWithRoles(ctx, sessionID)
 	if err != nil {
+		log.Error().Err(err).Str("session_id", sessionID).Msg("GetWithRoles 失败")
 		return fmt.Errorf("获取会话失败: %w", err)
 	}
 
@@ -178,21 +191,23 @@ func (h *SessionHandler) startOrchestration(ctx context.Context, sessionID strin
 		return fmt.Errorf("创建编排器失败: %w", err)
 	}
 
-	// 提取角色 ID 和主持人模型绑定
+	// 提取角色 ID 和主持人模型
 	roleIDs := make([]string, len(sessionRoles))
-	var moderatorModelBinding string
+	var moderatorModel string
+	var authorRoleID string
+	if sess.Config != nil {
+		var cfg struct {
+			ModeratorModel string `json:"moderator_model"`
+			AuthorRoleID   string `json:"author_role_id"`
+		}
+		if err := json.Unmarshal(sess.Config, &cfg); err == nil {
+			moderatorModel = cfg.ModeratorModel
+			authorRoleID = cfg.AuthorRoleID
+		}
+	}
 	for i, sr := range sessionRoles {
 		roleIDs[i] = sr.RoleID
-		// 第一个角色是主持人，提取其模型绑定
-		if i == 0 && sr.ModelOverride != nil {
-			var override struct {
-				Provider  string `json:"provider"`
-				ModelName string `json:"model_name"`
-			}
-			if err := json.Unmarshal(sr.ModelOverride, &override); err == nil && override.Provider != "" {
-				moderatorModelBinding = override.Provider
-			}
-		}
+		_ = i
 	}
 
 	progressCh := make(chan string, 10)
@@ -216,22 +231,24 @@ func (h *SessionHandler) startOrchestration(ctx context.Context, sessionID strin
 	switch orch := orch.(type) {
 	case *orchestrator.RoundRobinOrchestrator:
 		config := &orchestrator.RoundRobinConfig{
-			RoleIDs:               roleIDs,
-			Topic:                 topic,
-			MaxRounds:             sess.MaxRounds,
-			ModeratorModelBinding: moderatorModelBinding,
-			InterruptCh:           ch.InterruptCh,
-			ResumeCh:              ch.ResumeCh,
+			RoleIDs:         roleIDs,
+			Topic:           topic,
+			MaxRounds:       sess.MaxRounds,
+			ModeratorModel:  moderatorModel,
+			ModeratorPrompt: "",
+			InterruptCh:     ch.InterruptCh,
+			ResumeCh:        ch.ResumeCh,
 		}
 		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
 
 	case *orchestrator.CourtOrchestrator:
 		config := &orchestrator.CourtConfig{
-			RoleIDs:     roleIDs,
-			Topic:       topic,
-			MaxRounds:   sess.MaxRounds,
-			InterruptCh: ch.InterruptCh,
-			ResumeCh:    ch.ResumeCh,
+			RoleIDs:      roleIDs,
+			Topic:        topic,
+			MaxRounds:    sess.MaxRounds,
+			AuthorRoleID: authorRoleID,
+			InterruptCh:  ch.InterruptCh,
+			ResumeCh:     ch.ResumeCh,
 		}
 		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
 
@@ -258,8 +275,7 @@ func (h *SessionHandler) startOrchestration(ctx context.Context, sessionID strin
 		execErr = fmt.Errorf("不支持的编排器类型: %T", orch)
 	}
 
-	// 关闭 progressCh（避免 goroutine 泄漏）
-	close(progressCh)
+	// 注意：progressCh 由编排器内部关闭，这里不再重复关闭
 
 	// 仅当执行出错时才终止会话（让用户手动终止正常完成的讨论）
 	if execErr != nil {

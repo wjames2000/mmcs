@@ -41,9 +41,9 @@ export default function WorkspaceDetail() {
     fetchData()
   }, [id, user])
 
-  const handleCreateSession = async (title: string, paradigm: string, maxRounds: number, roleIds: string[], roleBindings?: Array<{role_id: string, model_override?: any}>, topic?: string) => {
+  const handleCreateSession = async (title: string, paradigm: string, maxRounds: number, roleIds: string[], roleBindings?: Array<{role_id: string, model_override?: any}>, topic?: string, moderatorModel?: string) => {
     if (!user || !id) return
-    const resp = await api.createSession(user.id, id, title, paradigm, maxRounds, roleIds, roleBindings, topic)
+    const resp = await api.createSession(user.id, id, title, paradigm, maxRounds, roleIds, roleBindings, topic, moderatorModel)
     const newSession = resp.session || resp
     setSessions(prev => [newSession, ...prev])
   }

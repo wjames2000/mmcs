@@ -184,7 +184,7 @@ func (e *EvaluationOrchestrator) Execute(
 	if progressCh != nil {
 		progressCh <- "专家评分中..."
 	}
-	if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+	if ok, _ := CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge); !ok {
 		if progressCh != nil {
 			close(progressCh)
 		}
@@ -198,7 +198,7 @@ func (e *EvaluationOrchestrator) Execute(
 		if progressCh != nil {
 			progressCh <- "批评者提出质疑..."
 		}
-		if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+		if ok, _ := CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge); !ok {
 			if progressCh != nil {
 				close(progressCh)
 			}
@@ -213,7 +213,7 @@ func (e *EvaluationOrchestrator) Execute(
 		if progressCh != nil {
 			progressCh <- "专家回应质疑并调整评分..."
 		}
-		if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+		if ok, _ := CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge); !ok {
 			if progressCh != nil {
 				close(progressCh)
 			}
@@ -316,7 +316,7 @@ func (e *EvaluationOrchestrator) executeExpertScoring(
 
 			if bridge != nil {
 				_ = bridge.Push(&stream.GraphEvent{
-					Type:      "agent_speak",
+					Type:      "role.speak",
 					NodeName:  "expert_scoring",
 					RoleName:  rc.Role.Name,
 					Content:   resp.Content,
@@ -431,7 +431,7 @@ func (e *EvaluationOrchestrator) executeCriticChallenge(
 
 	if bridge != nil {
 		_ = bridge.Push(&stream.GraphEvent{
-			Type:      "agent_speak",
+			Type:      "role.speak",
 			NodeName:  "critic_challenge",
 			RoleName:  criticRC.Role.Name,
 			Content:   resp.Content,
@@ -554,7 +554,7 @@ func (e *EvaluationOrchestrator) executeScoreAdjustment(
 
 			if bridge != nil {
 				_ = bridge.Push(&stream.GraphEvent{
-					Type:      "agent_speak",
+					Type:      "role.speak",
 					NodeName:  "score_adjustment",
 					RoleName:  rc.Role.Name,
 					Content:   resp.Content,

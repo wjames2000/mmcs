@@ -7,9 +7,25 @@ import (
 
 	"github.com/rs/zerolog/log"
 	"github.com/wjames2000/mmcs/internal/model_gateway"
+	"github.com/wjames2000/mmcs/internal/role"
 	"github.com/wjames2000/mmcs/internal/session"
 	"github.com/wjames2000/mmcs/internal/stream"
 )
+
+// defaultModeratorPrompt 主持人默认系统提示词
+const defaultModeratorPrompt = `你是本次会议的主持人，请保持中立客观的立场。
+
+## 你的职责
+1. 开场时介绍讨论议题、背景和待解决问题
+2. 每轮结束后总结各专家的核心观点
+3. 评估是否已达到结论，决定是否进入下一轮
+4. 保持中立，不表达个人观点，不偏向任何一方
+
+## 行为准则
+- 不要参与专业讨论，你的角色是组织和引导
+- 每轮总结要公正地涵盖所有专家的意见
+- 如果专家之间有明显分歧，明确指出分歧点
+- 当讨论达成共识或触及核心问题时，适时结束讨论`
 
 // RoundRobinConfig 轮询发言范式配置
 type RoundRobinConfig struct {
@@ -18,12 +34,11 @@ type RoundRobinConfig struct {
 	CustomPrompt string   // 用户自定义额外提示
 	MaxRounds    int
 
-	// ModeratorRoleIndex 主持人在 roleContexts 中的索引
-	// 默认 0（第一个角色），设为 -1 表示无主持人
-	ModeratorRoleIndex int
-
-	// ModeratorModelBinding 主持人模型绑定，如 "openai:gpt-4"
-	ModeratorModelBinding string
+	// 主持人独立配置（不再是角色列表中的一员）
+	// ModeratorModel 主持人绑定的模型标识，如 "openai:gpt-4"
+	ModeratorModel string
+	// ModeratorPrompt 主持人系统提示词（为空则用默认）
+	ModeratorPrompt string
 
 	// InterruptCh 和 ResumeCh 用于支持人类介入（Pause/Resume）
 	InterruptCh chan *session.InterruptSignal `json:"-"`
@@ -87,26 +102,34 @@ func (r *RoundRobinOrchestrator) Execute(
 		return nil, fmt.Errorf("初始化角色上下文失败: %w", err)
 	}
 
-	// 应用主持人模型绑定
-	if config.ModeratorRoleIndex < 0 {
-		config.ModeratorRoleIndex = 0
-	}
-	modIndex := config.ModeratorRoleIndex
-	if modIndex >= len(roleContexts) {
-		modIndex = 0
+	// 2. 创建独立的主持人角色上下文
+	moderatorName := "会议主持人"
+	moderatorPrompt := config.ModeratorPrompt
+	if moderatorPrompt == "" {
+		moderatorPrompt = defaultModeratorPrompt
 	}
 
-	if config.ModeratorModelBinding != "" && len(roleContexts) > modIndex && r.gateway != nil {
-		modModel, modErr := r.gateway.GetChatModel(config.ModeratorModelBinding)
+	moderatorRC := &RoleContext{
+		Role: &role.Role{
+			Name:  moderatorName,
+			Title: "Moderator",
+		},
+		ChatModel: nil,
+		Prompt:    moderatorPrompt,
+	}
+
+	// 如果配置了主持人模型，尝试绑定
+	if config.ModeratorModel != "" && r.gateway != nil {
+		modModel, modErr := r.gateway.GetChatModel(config.ModeratorModel)
 		if modErr != nil {
-			log.Warn().Err(modErr).Str("binding", config.ModeratorModelBinding).Msg("获取主持人模型失败，使用默认模型")
+			log.Warn().Err(modErr).Str("model", config.ModeratorModel).Msg("获取主持人模型失败，使用默认模型")
 		} else {
-			roleContexts[modIndex].ChatModel = modModel
-			log.Info().Str("binding", config.ModeratorModelBinding).Str("role", roleContexts[modIndex].Role.Name).Msg("主持人模型绑定成功")
+			moderatorRC.ChatModel = modModel
+			log.Info().Str("model", config.ModeratorModel).Msg("主持人模型绑定成功")
 		}
 	}
 
-	// 2. 创建讨论状态
+	// 3. 创建讨论状态
 	state := NewDiscussionState(sessionID, config.MaxRounds, bridge)
 	state.Roles = roleContexts
 	if config.InterruptCh != nil && config.ResumeCh != nil {
@@ -116,19 +139,17 @@ func (r *RoundRobinOrchestrator) Execute(
 		state.SetMessageStore(config.MsgStore)
 	}
 
-	// 3. 主持人开场白
-	if len(roleContexts) > modIndex {
-		moderatorRC := roleContexts[modIndex]
-		if progressCh != nil {
-			progressCh <- fmt.Sprintf("主持人 %s 开场发言...", moderatorRC.Role.Name)
-		}
+	// 4. 主持人开场白
+	if progressCh != nil {
+		progressCh <- fmt.Sprintf("主持人 %s 开场发言...", moderatorRC.Role.Name)
+	}
 
-		// 生成开场白（包含附件/主题背景信息）
-		var openingStatement string
-		if moderatorRC.ChatModel == nil {
-			openingStatement = generateSimulatedOpinion(moderatorRC.Role, config.Topic, 1, nil)
-		} else {
-			openingPrompt := fmt.Sprintf(`作为本次会议的主持人，请为关于「%s」的讨论做一段开场白。
+	// 生成开场白（包含附件/主题背景信息）
+	var openingStatement string
+	if moderatorRC.ChatModel == nil {
+		openingStatement = generateSimulatedOpinion(moderatorRC.Role, config.Topic, 1, nil)
+	} else {
+		openingPrompt := fmt.Sprintf(`作为本次会议的主持人，请为关于「%s」的讨论做一段开场白。
 
 请包含以下内容：
 1. 欢迎各位专家参与讨论
@@ -136,45 +157,44 @@ func (r *RoundRobinOrchestrator) Execute(
 3. 列出本次需要解决的关键问题
 4. 引导各位专家依次发言`, config.Topic)
 
-			modMessages := []model_gateway.ChatMessage{
-				{Role: "system", Content: moderatorRC.Prompt},
-				{Role: "user", Content: openingPrompt},
-			}
-			resp, err := moderatorRC.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
-				Messages: modMessages,
-			})
-			if err != nil {
-				log.Warn().Err(err).Str("role", moderatorRC.Role.Name).Msg("主持人开场失败，使用模拟")
-				openingStatement = generateSimulatedOpinion(moderatorRC.Role, config.Topic, 1, nil)
-			} else {
-				openingStatement = resp.Content
-			}
+		modMessages := []model_gateway.ChatMessage{
+			{Role: "system", Content: moderatorRC.Prompt},
+			{Role: "user", Content: openingPrompt},
 		}
-
-		// 添加开场白到历史
-		state.AddHistory(&model_gateway.ChatMessage{
-			Role:    "assistant",
-			Content: openingStatement,
+		resp, err := moderatorRC.ChatModel.Generate(ctx, &model_gateway.ChatRequest{
+			Messages: modMessages,
 		})
-
-		// 持久化开场白消息
-		if state.MsgStore != nil {
-			state.MsgStore.Add(sessionID, 0, moderatorRC.Role.Name, openingStatement, len(openingStatement)/4)
+		if err != nil {
+			log.Warn().Err(err).Str("role", moderatorRC.Role.Name).Msg("主持人开场失败，使用模拟")
+			openingStatement = generateSimulatedOpinion(moderatorRC.Role, config.Topic, 1, nil)
+		} else {
+			openingStatement = resp.Content
 		}
-
-		// 推送事件
-		if bridge != nil {
-			_ = bridge.Push(&stream.GraphEvent{
-				Type:      "moderator_speech",
-				NodeName:  "opening",
-				RoleName:  moderatorRC.Role.Name,
-				Content:   openingStatement,
-				Timestamp: time.Now(),
-			})
-		}
-
-		log.Info().Str("session_id", sessionID).Str("moderator", moderatorRC.Role.Name).Msg("主持人开场发言完成")
 	}
+
+	// 添加开场白到历史
+	state.AddHistory(&model_gateway.ChatMessage{
+		Role:    "assistant",
+		Content: openingStatement,
+	})
+
+	// 持久化开场白消息
+	if state.MsgStore != nil {
+		state.MsgStore.Add(sessionID, 0, moderatorRC.Role.Name, openingStatement, len(openingStatement)/4)
+	}
+
+	// 推送事件
+	if bridge != nil {
+		_ = bridge.Push(&stream.GraphEvent{
+			Type:      "moderator_speech",
+			NodeName:  "opening",
+			RoleName:  moderatorRC.Role.Name,
+			Content:   openingStatement,
+			Timestamp: time.Now(),
+		})
+	}
+
+	log.Info().Str("session_id", sessionID).Str("moderator", moderatorRC.Role.Name).Msg("主持人开场发言完成")
 
 	// 4. 主循环：每轮发言 → 评估
 	for round := 1; round <= config.MaxRounds; round++ {
@@ -187,9 +207,23 @@ func (r *RoundRobinOrchestrator) Execute(
 		}
 
 		// 检查中断/恢复信号（人类介入）
-		if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+		shouldContinue, resumeMsg := CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge)
+		if !shouldContinue {
 			log.Info().Str("session_id", sessionID).Int("round", round).Msg("讨论在中断后取消")
 			return nil, ctx.Err()
+		}
+		if resumeMsg != "" {
+			state.PauseUserInput = resumeMsg
+			state.AddHistory(&model_gateway.ChatMessage{Role: "user", Content: resumeMsg})
+			if bridge != nil {
+				_ = bridge.Push(&stream.GraphEvent{
+					Type:      "user_message",
+					NodeName:  "user_input",
+					RoleName:  "用户",
+					Content:   resumeMsg,
+					Timestamp: time.Now(),
+				})
+			}
 		}
 
 		state.IncrementRound()
@@ -202,7 +236,7 @@ func (r *RoundRobinOrchestrator) Execute(
 		// 推送轮次开始事件
 		if bridge != nil {
 			_ = bridge.Push(&stream.GraphEvent{
-				Type:      "round_start",
+				Type:      "round.start",
 				NodeName:  fmt.Sprintf("round_%d", currentRound),
 				Content:   config.Topic,
 				Timestamp: time.Now(),
@@ -241,7 +275,7 @@ func (r *RoundRobinOrchestrator) Execute(
 			_ = bridge.Push(&stream.GraphEvent{
 				Type:      "moderator_speech",
 				NodeName:  fmt.Sprintf("round_%d_eval", currentRound),
-				RoleName:  roleContexts[modIndex].Role.Name,
+				RoleName:  moderatorRC.Role.Name,
 				Content:   evalContent,
 				Timestamp: time.Now(),
 			})

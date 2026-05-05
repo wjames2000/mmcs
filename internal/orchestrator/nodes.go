@@ -43,6 +43,9 @@ type DiscussionState struct {
 	LastRoundSummary string
 	// roleLastMessages 记录每个角色最近一次的发言内容（按角色名索引）
 	roleLastMessages map[string]string
+
+	// PauseUserInput 用户在暂停期间输入的内容，恢复后注入下一轮模型调用
+	PauseUserInput string
 }
 
 // NewDiscussionState 创建讨论状态
@@ -70,10 +73,10 @@ func (s *DiscussionState) SetMessageStore(store *session.MessageStore) {
 // 如果有中断信号，暂停执行并等待恢复信号
 // ctx: 外层上下文
 // bridge: SSE 事件桥（可为 nil）
-// returns: true 表示需要继续执行，false 表示 ctx 已取消
-func CheckInterrupt(ctx context.Context, interruptCh <-chan *session.InterruptSignal, resumeCh <-chan *session.ResumeSignal, bridge *stream.Bridge) bool {
+// returns: (是否继续执行, 恢复时用户输入的消息)
+func CheckInterrupt(ctx context.Context, interruptCh <-chan *session.InterruptSignal, resumeCh <-chan *session.ResumeSignal, bridge *stream.Bridge) (bool, string) {
 	if interruptCh == nil {
-		return true
+		return true, ""
 	}
 
 	select {
@@ -90,7 +93,7 @@ func CheckInterrupt(ctx context.Context, interruptCh <-chan *session.InterruptSi
 
 		// 等待恢复信号
 		select {
-		case <-resumeCh:
+		case resumeSig := <-resumeCh:
 			// 广播恢复事件
 			if bridge != nil {
 				_ = bridge.Push(&stream.GraphEvent{
@@ -98,21 +101,21 @@ func CheckInterrupt(ctx context.Context, interruptCh <-chan *session.InterruptSi
 					Timestamp: time.Now(),
 				})
 			}
-			return true
+			return true, resumeSig.Message
 		case <-ctx.Done():
-			return false
+			return false, ""
 		}
 	case <-ctx.Done():
-		return false
+		return false, ""
 	default:
-		return true
+		return true, ""
 	}
 }
 
 // WaitForInterrupt 阻塞等待中断信号（用于暂停点）
-func WaitForInterrupt(ctx context.Context, interruptCh <-chan *session.InterruptSignal, resumeCh <-chan *session.ResumeSignal, bridge *stream.Bridge) bool {
+func WaitForInterrupt(ctx context.Context, interruptCh <-chan *session.InterruptSignal, resumeCh <-chan *session.ResumeSignal, bridge *stream.Bridge) (bool, string) {
 	if interruptCh == nil {
-		return true
+		return true, ""
 	}
 
 	select {
@@ -127,19 +130,19 @@ func WaitForInterrupt(ctx context.Context, interruptCh <-chan *session.Interrupt
 		}
 
 		select {
-		case <-resumeCh:
+		case resumeSig := <-resumeCh:
 			if bridge != nil {
 				_ = bridge.Push(&stream.GraphEvent{
 					Type:      "session.resumed",
 					Timestamp: time.Now(),
 				})
 			}
-			return true
+			return true, resumeSig.Message
 		case <-ctx.Done():
-			return false
+			return false, ""
 		}
 	case <-ctx.Done():
-		return false
+		return false, ""
 	}
 }
 
@@ -248,8 +251,10 @@ func (n *ContextInitNode) InitRoleContexts(ctx context.Context, roleIDs []string
 		if err != nil {
 			// 模型不可用时不返回错误，ChatModel 留 nil
 			// ExpertSpeakNode 和 ModeratorEvalNode 会检测 nil 并使用模拟模式
-			log.Warn().Err(err).Str("role", roleID).Msg("获取模型失败，使用模拟模式")
+			log.Error().Err(err).Str("role", roleID).Str("binding", binding).Msg("获取模型失败，使用模拟模式")
 			chatModel = nil
+		} else {
+			log.Info().Str("role", roleID).Str("binding", binding).Msg("模型获取成功")
 		}
 
 		roleContexts = append(roleContexts, &RoleContext{
@@ -432,6 +437,14 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 				})
 			}
 
+			// 注入用户在暂停期间输入的内容
+			if state.PauseUserInput != "" {
+				messages = append(messages, model_gateway.ChatMessage{
+					Role:    "user",
+					Content: fmt.Sprintf("用户补充的额外信息（请仔细阅读并纳入考虑）：\n%s", state.PauseUserInput),
+				})
+			}
+
 			if state.Bridge != nil {
 				_ = state.Bridge.Push(&stream.GraphEvent{
 					Type:      "node_start",
@@ -458,6 +471,13 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 				}
 			} else {
 				// 真实模型：用 goroutine+channel 强制超时（防止 Generate 忽略 context）
+				log.Info().Str("role", rctx.Role.Name).Str("topic", topic).Int("msg_count", len(messages)).Msg("开始调用模型")
+
+				// 打印发送给模型的 messages（调试用）
+				for i, msg := range messages {
+					log.Debug().Int("msg_idx", i).Str("role", msg.Role).Str("content", msg.Content).Msg("message")
+				}
+
 				type genResult struct {
 					resp *model_gateway.ChatResponse
 					err  error
@@ -483,6 +503,7 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 						tokens = len(content) / 4
 						execErr = gr.err
 					} else {
+						log.Info().Str("role", rctx.Role.Name).Int("content_len", len(gr.resp.Content)).Int("tokens", gr.resp.TotalTokens).Msg("模型调用成功")
 						content = gr.resp.Content
 						tokens = gr.resp.TotalTokens
 					}
@@ -517,7 +538,7 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 			// 推送发言事件
 			if state.Bridge != nil {
 				_ = state.Bridge.Push(&stream.GraphEvent{
-					Type:      "agent_speak",
+					Type:      "role.speak",
 					NodeName:  "expert_speak",
 					RoleName:  rctx.Role.Name,
 					Content:   content,
@@ -608,7 +629,7 @@ func (n *ModeratorEvalNode) Evaluate(state *DiscussionState) *EvalResult {
 	if state.Bridge != nil {
 		_ = state.Bridge.Push(&stream.GraphEvent{
 			Type:      "node_start",
-			NodeName:  "moderator_eval",
+			NodeName:  "round.eval",
 			Timestamp: time.Now(),
 		})
 	}
@@ -665,7 +686,7 @@ func (n *ModeratorEvalNode) Evaluate(state *DiscussionState) *EvalResult {
 
 	if state.Bridge != nil {
 		_ = state.Bridge.Push(&stream.GraphEvent{
-			Type:      "moderator_eval",
+			Type:      "round.eval",
 			NodeName:  fmt.Sprintf("round_%d_eval", currentRound),
 			Content:   evalContent,
 			Metadata:  result,
@@ -673,7 +694,7 @@ func (n *ModeratorEvalNode) Evaluate(state *DiscussionState) *EvalResult {
 		})
 		_ = state.Bridge.Push(&stream.GraphEvent{
 			Type:      "node_end",
-			NodeName:  "moderator_eval",
+			NodeName:  "round.eval",
 			Timestamp: time.Now(),
 		})
 	}

@@ -93,8 +93,13 @@ func (c *CourtOrchestrator) Execute(
 	// 分离作者角色和审查员角色
 	var authorRC *RoleContext
 	reviewers := make([]*RoleContext, 0, len(roleContexts)-1)
+	authorRoleID := config.AuthorRoleID
+	if authorRoleID == "" && len(roleContexts) > 0 {
+		authorRoleID = roleContexts[0].Role.ID
+		log.Info().Str("session_id", sessionID).Str("author_role_id", authorRoleID).Msg("未指定作者角色，默认使用第一个角色")
+	}
 	for _, rc := range roleContexts {
-		if rc.Role.ID == config.AuthorRoleID {
+		if rc.Role.ID == authorRoleID {
 			authorRC = rc
 		} else {
 			reviewers = append(reviewers, rc)
@@ -119,7 +124,7 @@ func (c *CourtOrchestrator) Execute(
 		progressCh <- "作者陈述中..."
 	}
 	// 检查中断（人类可在阶段之间介入）
-	if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+	if ok, _ := CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge); !ok {
 		if progressCh != nil {
 			close(progressCh)
 		}
@@ -135,7 +140,7 @@ func (c *CourtOrchestrator) Execute(
 		if progressCh != nil {
 			progressCh <- fmt.Sprintf("%d 位审查员并行审查中...", len(reviewers))
 		}
-		if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+		if ok, _ := CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge); !ok {
 			if progressCh != nil {
 				close(progressCh)
 			}
@@ -150,7 +155,7 @@ func (c *CourtOrchestrator) Execute(
 	if progressCh != nil {
 		progressCh <- "作者回应审查意见..."
 	}
-	if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+	if ok, _ := CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge); !ok {
 		if progressCh != nil {
 			close(progressCh)
 		}
@@ -252,7 +257,7 @@ func (c *CourtOrchestrator) executeAuthorStatement(
 	// 推送事件
 	if bridge != nil {
 		_ = bridge.Push(&stream.GraphEvent{
-			Type:      "agent_speak",
+			Type:      "role.speak",
 			NodeName:  "author_statement",
 			RoleName:  authorRC.Role.Name,
 			Content:   resp.Content,
@@ -381,7 +386,7 @@ func (c *CourtOrchestrator) executeAuthorResponse(
 	// 推送事件
 	if bridge != nil {
 		_ = bridge.Push(&stream.GraphEvent{
-			Type:      "agent_speak",
+			Type:      "role.speak",
 			NodeName:  "author_response",
 			RoleName:  authorRC.Role.Name,
 			Content:   resp.Content,

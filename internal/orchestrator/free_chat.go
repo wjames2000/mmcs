@@ -118,12 +118,26 @@ func (f *FreeChatOrchestrator) Execute(
 		}
 
 		// 检查中断/恢复信号（人类介入）
-		if !CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge) {
+		shouldContinue, resumeMsg := CheckInterrupt(ctx, state.InterruptCh, state.ResumeCh, bridge)
+		if !shouldContinue {
 			log.Info().Str("session_id", sessionID).Int("round", round).Msg("自由群聊在中断后取消")
 			if progressCh != nil {
 				close(progressCh)
 			}
 			return nil, ctx.Err()
+		}
+		if resumeMsg != "" {
+			state.PauseUserInput = resumeMsg
+			state.AddHistory(&model_gateway.ChatMessage{Role: "user", Content: resumeMsg})
+			if bridge != nil {
+				_ = bridge.Push(&stream.GraphEvent{
+					Type:      "user_message",
+					NodeName:  "user_input",
+					RoleName:  "用户",
+					Content:   resumeMsg,
+					Timestamp: time.Now(),
+				})
+			}
 		}
 
 		if progressCh != nil {
@@ -240,7 +254,7 @@ func (f *FreeChatOrchestrator) Execute(
 
 			if bridge != nil {
 				_ = bridge.Push(&stream.GraphEvent{
-					Type:      "moderator_eval",
+					Type:      "round.eval",
 					NodeName:  "free_chat_moderator",
 					Content:   evalResult.Summary,
 					Timestamp: time.Now(),

@@ -61,6 +61,7 @@ export function useSSE(sessionId: string | null): UseSSEResult {
       case 'session.paused': setStatus('paused'); break
       case 'session.resumed': setStatus('running'); break
       case 'session.ended': setStatus('ended'); break
+      case 'done': setStatus('ended'); break
       case 'error': setStatus('error'); break
     }
 
@@ -143,7 +144,7 @@ export function useSSE(sessionId: string | null): UseSSEResult {
 
     es.addEventListener('connected', () => setIsConnected(true))
 
-    const eventTypes = ['round.start', 'role.speak', 'role.done', 'round.eval', 'session.paused', 'session.resumed', 'session.ended']
+    const eventTypes = ['round.start', 'role.speak', 'role.done', 'round.eval', 'session.paused', 'session.resumed', 'session.ended', 'moderator_speech', 'user_message', 'done']
     eventTypes.forEach(et => {
       es.addEventListener(et, (e) => handleEvent({ ...JSON.parse(e.data), type: et } as any))
     })

@@ -6,6 +6,7 @@ import (
 
 	"github.com/wjames2000/mmcs/internal/agent"
 	"github.com/wjames2000/mmcs/internal/api/middleware"
+	"github.com/wjames2000/mmcs/internal/model_gateway"
 	"github.com/wjames2000/mmcs/internal/orchestrator"
 	"github.com/wjames2000/mmcs/internal/role"
 	"github.com/wjames2000/mmcs/internal/session"
@@ -35,6 +36,7 @@ type Dependencies struct {
 	HealthHandler       *HealthHandler
 	MetricsHandler      MetricsHandler
 	MaterialStore       *session.MaterialStore
+	ModelGateway        *model_gateway.Gateway
 }
 
 // NewRouter 创建并注册所有路由
@@ -135,6 +137,19 @@ func NewRouter(deps *Dependencies) http.Handler {
 		mux.Handle("POST /api/v1/tasks/{id}/validate", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(validationHandler.TriggerValidation)))))
 		mux.Handle("GET /api/v1/tasks/{id}/validation", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(validationHandler.GetValidationResult)))))
 		mux.Handle("POST /api/v1/tasks/{id}/retry-validation", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(validationHandler.RetryValidation)))))
+	}
+
+	// ===== 模型配置（需 JWT） =====
+	if deps.ModelGateway != nil {
+		modelHandler := NewModelHandler(deps.ModelGateway)
+		modelAuth := deps.AuthMiddleware.Authenticate
+		mux.Handle("GET /api/v1/models", rl.Limit(middleware.PanicRecovery(modelAuth(http.HandlerFunc(modelHandler.ListModels)))))
+		mux.Handle("GET /api/v1/models/providers", rl.Limit(middleware.PanicRecovery(modelAuth(http.HandlerFunc(modelHandler.ListProviders)))))
+		mux.Handle("POST /api/v1/models/providers", rl.Limit(middleware.PanicRecovery(modelAuth(http.HandlerFunc(modelHandler.CreateProvider)))))
+		mux.Handle("PUT /api/v1/models/providers/{id}", rl.Limit(middleware.PanicRecovery(modelAuth(http.HandlerFunc(modelHandler.UpdateProvider)))))
+		mux.Handle("DELETE /api/v1/models/providers/{id}", rl.Limit(middleware.PanicRecovery(modelAuth(http.HandlerFunc(modelHandler.DeleteProvider)))))
+		mux.Handle("POST /api/v1/models/providers/{id}/toggle", rl.Limit(middleware.PanicRecovery(modelAuth(http.HandlerFunc(modelHandler.ToggleProvider)))))
+		mux.Handle("GET /api/v1/models/refresh/{providerName}", rl.Limit(middleware.PanicRecovery(modelAuth(http.HandlerFunc(modelHandler.RefreshModels)))))
 	}
 
 	return middleware.CORS(middleware.PanicRecovery(mux))

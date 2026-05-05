@@ -17,14 +17,16 @@ func TestCheckInterrupt_NoSignal(t *testing.T) {
 	bridge := stream.NewBridge(hub, 10)
 	ctx := context.Background()
 
-	interrupted := CheckInterrupt(ctx, interruptCh, resumeCh, bridge)
+	interrupted, msg := CheckInterrupt(ctx, interruptCh, resumeCh, bridge)
 	assert.True(t, interrupted, "无信号不应中断")
+	assert.Empty(t, msg, "无信号不应有恢复消息")
 }
 
 func TestCheckInterrupt_NilChannels(t *testing.T) {
 	ctx := context.Background()
-	interrupted := CheckInterrupt(ctx, nil, nil, nil)
+	interrupted, msg := CheckInterrupt(ctx, nil, nil, nil)
 	assert.True(t, interrupted, "nil channel 不应中断")
+	assert.Empty(t, msg, "nil channel 不应有恢复消息")
 }
 
 func TestCheckInterrupt_HasSignal(t *testing.T) {
@@ -44,11 +46,12 @@ func TestCheckInterrupt_HasSignal(t *testing.T) {
 
 	// 预填充中断和恢复信号
 	interruptCh <- &session.InterruptSignal{NodeName: "expert_speak", Message: "请暂停"}
-	resumeCh <- &session.ResumeSignal{Message: "继续"}
+	resumeCh <- &session.ResumeSignal{Message: "继续讨论"}
 
 	ctx := context.Background()
-	interrupted := CheckInterrupt(ctx, interruptCh, resumeCh, bridge)
+	interrupted, msg := CheckInterrupt(ctx, interruptCh, resumeCh, bridge)
 	assert.True(t, interrupted, "收到恢复信号后应继续")
+	assert.Equal(t, "继续讨论", msg, "应返回恢复消息内容")
 
 	// 验证 bridge 收到了暂停事件
 	select {
@@ -79,8 +82,9 @@ func TestCheckInterrupt_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // 立即取消
 
-	interrupted := CheckInterrupt(ctx, interruptCh, resumeCh, bridge)
+	interrupted, msg := CheckInterrupt(ctx, interruptCh, resumeCh, bridge)
 	assert.False(t, interrupted, "context 取消后应返回 false")
+	assert.Empty(t, msg, "context 取消后应返回空消息")
 }
 
 func TestCheckInterrupt_CancelDuringInterrupt(t *testing.T) {
@@ -103,8 +107,9 @@ func TestCheckInterrupt_CancelDuringInterrupt(t *testing.T) {
 	}()
 
 	// CheckInterrupt 会阻塞等待恢复信号，但 context 取消会触发
-	interrupted := CheckInterrupt(ctx, interruptCh, resumeCh, bridge)
+	interrupted, msg := CheckInterrupt(ctx, interruptCh, resumeCh, bridge)
 	assert.False(t, interrupted, "暂停中 context 取消后应返回 false")
+	assert.Empty(t, msg, "暂停中 context 取消后应返回空消息")
 }
 
 func TestWaitForInterrupt_ResumeReceived(t *testing.T) {
@@ -116,11 +121,12 @@ func TestWaitForInterrupt_ResumeReceived(t *testing.T) {
 
 	// 预填充信号
 	interruptCh <- &session.InterruptSignal{NodeName: "test", Message: "请暂停"}
-	resumeCh <- &session.ResumeSignal{Message: "继续"}
+	resumeCh <- &session.ResumeSignal{Message: "用户补充信息"}
 
 	ctx := context.Background()
-	result := WaitForInterrupt(ctx, interruptCh, resumeCh, bridge)
+	result, msg := WaitForInterrupt(ctx, interruptCh, resumeCh, bridge)
 	assert.True(t, result, "收到恢复信号后应返回 true")
+	assert.Equal(t, "用户补充信息", msg, "应返回恢复消息内容")
 }
 
 func TestWaitForInterrupt_ContextCancelled(t *testing.T) {
@@ -132,8 +138,9 @@ func TestWaitForInterrupt_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // 立即取消
 
-	result := WaitForInterrupt(ctx, interruptCh, resumeCh, bridge)
+	result, msg := WaitForInterrupt(ctx, interruptCh, resumeCh, bridge)
 	assert.False(t, result, "context 取消后应返回 false")
+	assert.Empty(t, msg, "context 取消后应返回空消息")
 }
 
 func TestWaitForInterrupt_NoSignalButCancel(t *testing.T) {
@@ -151,12 +158,14 @@ func TestWaitForInterrupt_NoSignalButCancel(t *testing.T) {
 	}()
 
 	// WaitForInterrupt 会阻塞等待信号，但 context 取消会返回
-	result := WaitForInterrupt(ctx, interruptCh, resumeCh, bridge)
+	result, msg := WaitForInterrupt(ctx, interruptCh, resumeCh, bridge)
 	assert.False(t, result, "无信号且 context 取消后应返回 false")
+	assert.Empty(t, msg, "无信号且 context 取消后应返回空消息")
 }
 
 func TestWaitForInterrupt_NilChannels(t *testing.T) {
 	ctx := context.Background()
-	result := WaitForInterrupt(ctx, nil, nil, nil)
+	result, msg := WaitForInterrupt(ctx, nil, nil, nil)
 	assert.True(t, result, "nil channel 应直接返回 true")
+	assert.Empty(t, msg, "nil channel 应返回空消息")
 }

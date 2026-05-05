@@ -526,6 +526,7 @@ export default function SessionDetail() {
       {showRestartDialog && session && (
         <RestartSessionDialog
           sessionId={session.id}
+          sessionTitle={session.title}
           originalRoles={roles}
           originalSessionRoles={sessionRoles}
           creatorId={session.creator_id}

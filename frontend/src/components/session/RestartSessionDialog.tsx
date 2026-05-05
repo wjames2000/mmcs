@@ -4,6 +4,7 @@ import type { Role, SessionRole } from '../../types'
 
 interface Props {
   sessionId: string
+  sessionTitle: string
   originalRoles: Role[]
   originalSessionRoles: SessionRole[]
   creatorId: string
@@ -13,6 +14,7 @@ interface Props {
 
 export default function RestartSessionDialog({
   sessionId,
+  sessionTitle,
   originalRoles,
   originalSessionRoles,
   creatorId,
@@ -30,8 +32,8 @@ export default function RestartSessionDialog({
 
   // Pre-fill with original session data
   useEffect(() => {
-    const titleFromOriginal = originalRoles[0]
-      ? `${originalRoles[0].name} 等 - 续会`
+    const titleFromOriginal = sessionTitle
+      ? `${sessionTitle} - 续会`
       : '续会讨论'
     setTitle(titleFromOriginal)
 
