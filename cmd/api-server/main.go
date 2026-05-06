@@ -22,6 +22,7 @@ import (
 	"github.com/wjames2000/mmcs/internal/role"
 	"github.com/wjames2000/mmcs/internal/session"
 	"github.com/wjames2000/mmcs/internal/stream"
+	"github.com/wjames2000/mmcs/internal/task"
 	"github.com/wjames2000/mmcs/internal/user"
 	"github.com/wjames2000/mmcs/internal/workspace"
 	"github.com/wjames2000/mmcs/pkg/logger"
@@ -140,14 +141,15 @@ func main() {
 	})
 	log.Info().Msg("Provider 缓存初始化完成")
 
-	// 8. 会议材料存储 & 消息存储（持久化到数据库）
-	materialStore := session.NewMaterialStore()
+	// 8. 会议材料存储（持久化到数据库） & 消息存储
+	materialStore := session.NewPGMaterialStore(dbPool.Pool)
 	messageStore := session.NewPGMessageStore(dbPool.Pool)
 
 	// 9. Graph 池 & 会话服务
 	graphPool := session.NewGraphPool(cfg.Session.GraphPoolSize)
 	sessionSvc := session.NewService(sessionRepo, graphPool, roleSvc)
 	sessionSvc.SetMaterialStore(materialStore)
+	sessionSvc.SetMessageStore(messageStore)
 
 	// 设置 GraphPool 大小指标
 	mmcsmetrics.GraphPoolSize.WithLabelValues("capacity").Set(float64(cfg.Session.GraphPoolSize))
@@ -166,6 +168,10 @@ func main() {
 	auditCallback := audit.NewAuditCallback(10000)
 	log.Info().Int("audit_buffer_size", 10000).Msg("审计日志回调初始化完成")
 
+	// 13. 任务服务
+	taskStore := task.NewMemoryStore()
+	taskSvc := task.NewService(taskStore)
+
 	// ===== 注册路由 =====
 	deps := &api.Dependencies{
 		UserService:         userSvc,
@@ -175,6 +181,9 @@ func main() {
 		SessionService:      sessionSvc,
 		OrchestratorFactory: orchFactory,
 		HubRegistry:         hubRegistry,
+		AgentExecutor:       nil,
+		TaskService:         taskSvc,
+		TaskStore:           taskStore,
 		HealthHandler:       healthHandler,
 		MetricsHandler:      mmcsmetrics.MetricsHandler(),
 		MaterialStore:       materialStore,

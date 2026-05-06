@@ -46,6 +46,9 @@ type DiscussionState struct {
 
 	// PauseUserInput 用户在暂停期间输入的内容，恢复后注入下一轮模型调用
 	PauseUserInput string
+
+	// MaterialsContext 会议材料摘要，首轮注入所有角色模型
+	MaterialsContext string
 }
 
 // NewDiscussionState 创建讨论状态
@@ -414,6 +417,9 @@ func (n *ExpertSpeakNode) Execute(ctx context.Context, roles []*RoleContext, top
 				}
 				if topic != "" {
 					messages = append(messages, model_gateway.ChatMessage{Role: "user", Content: topic})
+				}
+				if state.MaterialsContext != "" {
+					messages = append(messages, model_gateway.ChatMessage{Role: "user", Content: state.MaterialsContext})
 				}
 			} else {
 				if topic != "" {

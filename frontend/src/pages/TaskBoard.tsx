@@ -16,7 +16,7 @@ export default function TaskBoard() {
     setError('')
     try {
       const data = await api.getTasks(workspaceId)
-      setTasks(data || [])
+      setTasks(Array.isArray(data) ? data : [])
     } catch (err: any) {
       setError(err.message || '加载任务失败')
     } finally {

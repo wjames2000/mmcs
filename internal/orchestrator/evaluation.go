@@ -41,6 +41,9 @@ type EvaluationConfig struct {
 
 	// MsgStore 消息持久化存储（可选）
 	MsgStore session.MessageStoreInterface `json:"-"`
+
+	// MaterialsContext 会议材料摘要，首轮注入所有角色模型
+	MaterialsContext string `json:"-"`
 }
 
 // ScoringResult 单个专家评分结果
@@ -152,6 +155,9 @@ func (e *EvaluationOrchestrator) Execute(
 
 	state := NewDiscussionState(sessionID, 1, bridge)
 	state.Roles = roleContexts
+	if config.MaterialsContext != "" {
+		state.MaterialsContext = config.MaterialsContext
+	}
 	if config.InterruptCh != nil && config.ResumeCh != nil {
 		state.SetInterruptChannels(config.InterruptCh, config.ResumeCh)
 	}

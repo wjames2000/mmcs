@@ -27,8 +27,12 @@ func NewTaskHandler(taskService *task.Service, sessionService *session.Service) 
 
 // ListTasks 获取任务列表
 // GET /api/v1/tasks?workspace_id=&session_id=&status=
+// GET /api/v1/workspaces/{workspaceId}/tasks
 func (h *TaskHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("workspace_id")
+	if workspaceID == "" {
+		workspaceID = r.PathValue("workspaceId")
+	}
 	sessionID := r.URL.Query().Get("session_id")
 	status := r.URL.Query().Get("status")
 

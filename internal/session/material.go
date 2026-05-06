@@ -23,6 +23,14 @@ type Material struct {
 	UploadedAt time.Time `json:"uploaded_at"`
 }
 
+// MaterialStoreInterface 材料存储接口（抽象，便于测试和多种实现）
+type MaterialStoreInterface interface {
+	Add(sessionID, fileName, mimeType string, data []byte) *Material
+	ListBySession(sessionID string) []*Material
+	Delete(id string) error
+	CopyToSession(sourceSessionID, targetSessionID string)
+}
+
 // MaterialStore 内存材料存储，支持并发安全
 // 线程安全：所有导出方法均使用 RWMutex 保护
 type MaterialStore struct {

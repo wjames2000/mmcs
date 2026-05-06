@@ -25,6 +25,9 @@ type CourtConfig struct {
 
 	// MsgStore 消息持久化存储（可选）
 	MsgStore session.MessageStoreInterface `json:"-"`
+
+	// MaterialsContext 会议材料摘要，首轮注入所有角色模型
+	MaterialsContext string `json:"-"`
 }
 
 // CourtOrchestrator 法庭范式编排器
@@ -83,6 +86,9 @@ func (c *CourtOrchestrator) Execute(
 	// 创建讨论状态
 	state := NewDiscussionState(sessionID, config.MaxRounds, bridge)
 	state.Roles = roleContexts
+	if config.MaterialsContext != "" {
+		state.MaterialsContext = config.MaterialsContext
+	}
 	if config.InterruptCh != nil && config.ResumeCh != nil {
 		state.SetInterruptChannels(config.InterruptCh, config.ResumeCh)
 	}

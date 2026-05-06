@@ -1,5 +1,6 @@
 import type { RoundRecord } from '../../types'
 import { getRoleColor } from '../../styles/colors'
+import Markdown from '../shared/Markdown'
 
 interface Props {
   rounds: RoundRecord[]
@@ -46,7 +47,9 @@ export default function ReasoningChain({ rounds }: Props) {
                         >
                           {speech.role_name}:
                         </span>
-                        <p className="text-sm text-gray-700">{speech.content}</p>
+                        <div className="text-sm text-gray-700">
+                          <Markdown content={speech.content} />
+                        </div>
                       </div>
                     )
                   })}

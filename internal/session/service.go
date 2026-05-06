@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,7 +48,8 @@ type Service struct {
 	mu            sync.RWMutex
 	runtimeChans  map[string]*SessionChannels // sessionID → runtime channels
 	hubRegistry   *stream.HubRegistry         // 用于广播 SSE 事件
-	materialStore *MaterialStore              // 会议材料存储
+	materialStore MaterialStoreInterface      // 会议材料存储
+	messageStore  MessageStoreInterface       // 消息持久化存储
 }
 
 // SetHubRegistry 设置 Hub 注册表（支持从外部注入）
@@ -55,8 +58,13 @@ func (s *Service) SetHubRegistry(hr *stream.HubRegistry) {
 }
 
 // SetMaterialStore 设置会议材料存储（支持从外部注入）
-func (s *Service) SetMaterialStore(ms *MaterialStore) {
+func (s *Service) SetMaterialStore(ms MaterialStoreInterface) {
 	s.materialStore = ms
+}
+
+// SetMessageStore 设置消息存储（支持从外部注入）
+func (s *Service) SetMessageStore(ms MessageStoreInterface) {
+	s.messageStore = ms
 }
 
 // NewService 创建会话服务
@@ -275,8 +283,7 @@ func (s *Service) GetWithRoles(ctx context.Context, id string) (*Session, []*Ses
 }
 
 // GetMinutes 获取会话会议纪要
-// 从已存储的会话信息构建 MeetingMinutes；CallbackRecord 持久化后会自动包含讨论记录
-// 如果已设置 MaterialStore，自动附加附件材料列表
+// 从已存储的会话信息和消息记录构建 MeetingMinutes
 func (s *Service) GetMinutes(ctx context.Context, id string) (*minutes.MeetingMinutes, error) {
 	sess, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -295,8 +302,76 @@ func (s *Service) GetMinutes(ctx context.Context, id string) (*minutes.MeetingMi
 		if err == nil && r != nil {
 			participants = append(participants, r.Name)
 		} else {
-			participants = append(participants, sr.RoleID) // fallback
+			participants = append(participants, sr.RoleID)
 		}
+	}
+
+	// 从消息存储构建轮次记录
+	rounds := []minutes.RoundRecord{}
+	decisions := []minutes.Decision{}
+	var conclusion string
+
+	if s.messageStore != nil {
+		msgs, err := s.messageStore.ListBySession(id)
+		if err == nil && len(msgs) > 0 {
+			// 按轮次分组
+			roundMap := make(map[int][]*ChatMessage)
+			for _, msg := range msgs {
+				roundMap[msg.Round] = append(roundMap[msg.Round], msg)
+			}
+
+			// 构建轮次记录
+			roundNumbers := make([]int, 0, len(roundMap))
+			for rn := range roundMap {
+				roundNumbers = append(roundNumbers, rn)
+			}
+			sort.Ints(roundNumbers)
+
+			for _, rn := range roundNumbers {
+				recs := roundMap[rn]
+				speeches := make([]minutes.SpeechRecord, 0, len(recs))
+				for _, msg := range recs {
+					speeches = append(speeches, minutes.SpeechRecord{
+						RoleName: msg.RoleName,
+						Content:  msg.Content,
+						Tokens:   msg.Tokens,
+					})
+				}
+				rounds = append(rounds, minutes.RoundRecord{
+					RoundNumber: rn,
+					Speeches:    speeches,
+				})
+			}
+
+			// 从最后一轮消息中提取结论
+			if len(msgs) > 0 {
+				lastMsg := msgs[len(msgs)-1]
+				conclusion = truncateContent(lastMsg.Content, 500)
+
+				// 查找包含"共识""结论""决定""一致"等关键词的消息作为决策
+				for _, msg := range msgs {
+					content := msg.Content
+					if strings.Contains(content, "共识") || strings.Contains(content, "结论") ||
+						strings.Contains(content, "决定") || strings.Contains(content, "一致同意") {
+						decisions = append(decisions, minutes.Decision{
+							Title:       fmt.Sprintf("第%d轮讨论结论", msg.Round),
+							Description: truncateContent(content, 300),
+							Accepted:    true,
+						})
+						if len(decisions) >= 5 {
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if rounds == nil {
+		rounds = []minutes.RoundRecord{}
+	}
+	if decisions == nil {
+		decisions = []minutes.Decision{}
 	}
 
 	mm := &minutes.MeetingMinutes{
@@ -304,9 +379,10 @@ func (s *Service) GetMinutes(ctx context.Context, id string) (*minutes.MeetingMi
 		Title:         sess.Title,
 		Paradigm:      sess.Paradigm,
 		Participants:  participants,
-		Rounds:        []minutes.RoundRecord{},
-		Decisions:     []minutes.Decision{},
+		Rounds:        rounds,
+		Decisions:     decisions,
 		Disagreements: []minutes.Disagreement{},
+		Conclusion:    conclusion,
 	}
 	if sess.StartedAt != nil {
 		mm.StartedAt = *sess.StartedAt
@@ -718,4 +794,13 @@ func (s *Service) GetMergedMinutes(ctx context.Context, newSessionID, originalSe
 	}
 
 	return result, nil
+}
+
+// truncateContent 截断内容到指定长度
+func truncateContent(content string, maxLen int) string {
+	runes := []rune(content)
+	if len(runes) <= maxLen {
+		return content
+	}
+	return string(runes[:maxLen]) + "..."
 }

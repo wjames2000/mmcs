@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	"github.com/wjames2000/mmcs/internal/api/middleware"
@@ -17,6 +18,7 @@ import (
 	"github.com/wjames2000/mmcs/internal/stream"
 	"github.com/wjames2000/mmcs/internal/task"
 	"github.com/wjames2000/mmcs/internal/user"
+	"github.com/wjames2000/mmcs/pkg/util"
 )
 
 // SessionService 会话服务接口（抽象 session.Service，便于测试 mock）
@@ -43,9 +45,10 @@ type SessionHandler struct {
 	sessionService      SessionService
 	orchestratorFactory *orchestrator.Factory
 	hubRegistry         *stream.HubRegistry
-	materialStore       *session.MaterialStore
+	materialStore       session.MaterialStoreInterface
 	messageStore        session.MessageStoreInterface
 	modelGateway        *model_gateway.Gateway
+	taskStore           task.Store
 }
 
 // NewSessionHandler 创建会话 handler
@@ -53,9 +56,10 @@ func NewSessionHandler(
 	sessionService SessionService,
 	orchestratorFactory *orchestrator.Factory,
 	hubRegistry *stream.HubRegistry,
-	materialStore *session.MaterialStore,
+	materialStore session.MaterialStoreInterface,
 	messageStore session.MessageStoreInterface,
 	modelGateway *model_gateway.Gateway,
+	taskStore task.Store,
 ) *SessionHandler {
 	return &SessionHandler{
 		sessionService:      sessionService,
@@ -64,6 +68,7 @@ func NewSessionHandler(
 		materialStore:       materialStore,
 		messageStore:        messageStore,
 		modelGateway:        modelGateway,
+		taskStore:           taskStore,
 	}
 }
 
@@ -234,41 +239,62 @@ func (h *SessionHandler) startOrchestration(ctx context.Context, sessionID strin
 		topic = sess.Title
 	}
 
+	// 加载会议材料，构建材料上下文
+	materialsContext := ""
+	if h.materialStore != nil {
+		materials := h.materialStore.ListBySession(sessionID)
+		if len(materials) > 0 {
+			var matBuilder strings.Builder
+			matBuilder.WriteString("\n\n## 会议附件材料\n")
+			for _, m := range materials {
+				matBuilder.WriteString(fmt.Sprintf("### %s (%s, %d bytes)\n", m.FileName, m.MimeType, m.FileSize))
+				if m.Content != "" {
+					matBuilder.WriteString(m.Content[:min(len(m.Content), 2000)])
+					matBuilder.WriteString("\n\n")
+				}
+			}
+			materialsContext = matBuilder.String()
+		}
+	}
+
 	// 根据范式类型执行
 	var execErr error
 	switch orch := orch.(type) {
 	case *orchestrator.RoundRobinOrchestrator:
 		config := &orchestrator.RoundRobinConfig{
-			RoleIDs:         roleIDs,
-			Topic:           topic,
-			MaxRounds:       sess.MaxRounds,
-			ModeratorModel:  moderatorModel,
-			ModeratorPrompt: "",
-			InterruptCh:     ch.InterruptCh,
-			ResumeCh:        ch.ResumeCh,
-			MsgStore:        h.messageStore,
+			RoleIDs:          roleIDs,
+			Topic:            topic,
+			MaxRounds:        sess.MaxRounds,
+			ModeratorModel:   moderatorModel,
+			ModeratorPrompt:  "",
+			InterruptCh:      ch.InterruptCh,
+			ResumeCh:         ch.ResumeCh,
+			MsgStore:         h.messageStore,
+			MaterialsContext: materialsContext,
 		}
 		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
 
 	case *orchestrator.CourtOrchestrator:
 		config := &orchestrator.CourtConfig{
-			RoleIDs:      roleIDs,
-			Topic:        topic,
-			MaxRounds:    sess.MaxRounds,
-			AuthorRoleID: authorRoleID,
-			InterruptCh:  ch.InterruptCh,
-			ResumeCh:     ch.ResumeCh,
-			MsgStore:     h.messageStore,
+			RoleIDs:          roleIDs,
+			Topic:            topic,
+			MaxRounds:        sess.MaxRounds,
+			AuthorRoleID:     authorRoleID,
+			InterruptCh:      ch.InterruptCh,
+			ResumeCh:         ch.ResumeCh,
+			MsgStore:         h.messageStore,
+			MaterialsContext: materialsContext,
 		}
 		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
 
 	case *orchestrator.EvaluationOrchestrator:
 		config := &orchestrator.EvaluationConfig{
-			RoleIDs:     roleIDs,
-			Topic:       topic,
-			InterruptCh: ch.InterruptCh,
-			ResumeCh:    ch.ResumeCh,
-			MsgStore:    h.messageStore,
+			RoleIDs:          roleIDs,
+			Topic:            topic,
+			InterruptCh:      ch.InterruptCh,
+			ResumeCh:         ch.ResumeCh,
+			MsgStore:         h.messageStore,
+			MaterialsContext: materialsContext,
 		}
 		_, execErr = orch.Execute(ctx, sessionID, config, bridge, progressCh)
 
@@ -701,14 +727,39 @@ func (h *SessionHandler) ExtractTasks(w http.ResponseWriter, r *http.Request) {
 	// 尝试使用 AI 模型提取任务
 	tasks := h.extractTasksWithModel(r.Context(), conversation, numRoles, numRounds, maxTasks)
 	if tasks == nil {
-		// 模型不可用或失败，回退到关键词提取
 		tasks = h.extractTasksWithKeywords(msgs)
+	}
+
+	// 持久化任务到 TaskStore
+	if h.taskStore != nil && len(tasks) > 0 {
+		// 获取会话的 workspace_id
+		sess, err := h.sessionService.Get(r.Context(), sessionID)
+		if err == nil && sess != nil {
+			for i := range tasks {
+				now := time.Now()
+				t := &task.Task{
+					ID:          util.NewID("t_"),
+					SessionID:   sessionID,
+					WorkspaceID: sess.WorkspaceID,
+					Title:       tasks[i].Title,
+					Description: tasks[i].Description,
+					Priority:    task.Priority(tasks[i].Priority),
+					Status:      task.StatusPending,
+					CreatedAt:   now,
+					UpdatedAt:   now,
+				}
+				if err := h.taskStore.Create(r.Context(), t); err == nil {
+					tasks[i].ID = t.ID
+				}
+			}
+		}
 	}
 
 	middleware.WriteSuccess(w, tasks)
 }
 
 type taskItem struct {
+	ID          string `json:"id,omitempty"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Role        string `json:"role"`

@@ -3,6 +3,7 @@ import DecisionList from './DecisionList'
 import ScoreMatrix from './ScoreMatrix'
 import ReasoningChain from './ReasoningChain'
 import MaterialList from './MaterialList'
+import Markdown from '../shared/Markdown'
 import { PARADIGM_LABELS, PARADIGM_ICONS } from '../../styles/colors'
 
 interface Props {
@@ -56,7 +57,9 @@ export default function MinutesView({ minutes, loading }: Props) {
       {minutes.conclusion && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-blue-800 mb-2">📝 讨论结论</h3>
-          <p className="text-sm text-blue-700 whitespace-pre-wrap">{minutes.conclusion}</p>
+          <div className="text-sm text-blue-700">
+            <Markdown content={minutes.conclusion} />
+          </div>
         </div>
       )}
 

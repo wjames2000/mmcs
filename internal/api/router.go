@@ -35,7 +35,7 @@ type Dependencies struct {
 	ValidationService   *validation.Service
 	HealthHandler       *HealthHandler
 	MetricsHandler      MetricsHandler
-	MaterialStore       *session.MaterialStore
+	MaterialStore       session.MaterialStoreInterface
 	ModelGateway        *model_gateway.Gateway
 	SessionMessageStore session.MessageStoreInterface
 }
@@ -50,7 +50,7 @@ func NewRouter(deps *Dependencies) http.Handler {
 	authHandler := NewAuthHandler(deps.UserService)
 	workspaceHandler := NewWorkspaceHandler(deps.WorkspaceService, deps.TaskService)
 	roleHandler := NewRoleHandler(deps.RoleService)
-	sessionHandler := NewSessionHandler(deps.SessionService, deps.OrchestratorFactory, deps.HubRegistry, deps.MaterialStore, deps.SessionMessageStore, deps.ModelGateway)
+	sessionHandler := NewSessionHandler(deps.SessionService, deps.OrchestratorFactory, deps.HubRegistry, deps.MaterialStore, deps.SessionMessageStore, deps.ModelGateway, deps.TaskStore)
 	agentHandler := NewAgentHandler(deps.AgentExecutor)
 	taskHandler := NewTaskHandler(deps.TaskService, deps.SessionService)
 
@@ -127,6 +127,7 @@ func NewRouter(deps *Dependencies) http.Handler {
 
 	// ===== 任务（需 JWT） =====
 	taskAuth := deps.AuthMiddleware.Authenticate
+	mux.Handle("GET /api/v1/workspaces/{workspaceId}/tasks", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(taskHandler.ListTasks)))))
 	mux.Handle("GET /api/v1/tasks", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(taskHandler.ListTasks)))))
 	mux.Handle("POST /api/v1/tasks", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(taskHandler.CreateTask)))))
 	mux.Handle("GET /api/v1/tasks/{id}", rl.Limit(middleware.PanicRecovery(taskAuth(http.HandlerFunc(taskHandler.GetTask)))))

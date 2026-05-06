@@ -1,4 +1,5 @@
 import type { Decision, Disagreement } from '../../types'
+import Markdown from '../shared/Markdown'
 
 interface Props {
   decisions: Decision[]
@@ -32,7 +33,9 @@ export default function DecisionList({ decisions, disagreements }: Props) {
               <span className="text-lg mt-0.5">{d.accepted ? '✅' : '⚠️'}</span>
               <div>
                 <h4 className="text-sm font-medium text-gray-900">{d.title}</h4>
-                <p className="text-sm text-gray-600 mt-1">{d.description}</p>
+                <div className="text-sm text-gray-600 mt-1">
+                  <Markdown content={d.description} />
+                </div>
                 {d.rejected_by && d.rejected_by.length > 0 && (
                   <p className="text-xs text-gray-400 mt-1">
                     反对: {d.rejected_by.join(', ')}
