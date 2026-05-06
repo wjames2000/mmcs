@@ -70,7 +70,9 @@ export default function ModelConfig() {
   const providerBadgeClass = (provider: string) => {
     const map: Record<string, string> = {
       openai: 'bg-green-100 text-green-700',
-      anthropic: 'bg-purple-100 text-purple-700',
+      openrouter: 'bg-blue-100 text-blue-700',
+      claude: 'bg-orange-100 text-orange-700',
+      anthropic: 'bg-orange-100 text-orange-700',
       ollama: 'bg-yellow-100 text-yellow-700',
       ark: 'bg-blue-100 text-blue-700',
     }

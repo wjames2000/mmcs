@@ -11,6 +11,8 @@ interface Props {
 
 const PROVIDER_TYPES = [
   { value: 'openai', label: 'OpenAI' },
+  { value: 'openrouter', label: 'OpenRouter' },
+  { value: 'claude', label: 'Anthropic Claude' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'ollama', label: 'Ollama' },
   { value: 'ark', label: 'Ark' },

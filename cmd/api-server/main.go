@@ -126,6 +126,8 @@ func main() {
 
 	// 注册提供商
 	gateway.RegisterProvider("openai", provider.NewOpenAIProvider)
+	gateway.RegisterProvider("openrouter", provider.NewOpenAIProvider)
+	gateway.RegisterProvider("claude", provider.NewClaudeProvider)
 	gateway.RegisterProvider("ollama", provider.NewOllamaProvider)
 
 	// 创建 Provider 缓存
