@@ -49,7 +49,9 @@ export default function SessionDetail() {
       api.getSessionTasks(sessionId).then(data => {
         setTasks(data || [])
         if (data && data.length > 0) setShowTasks(true)
-      }).catch(() => {}).finally(() => setTasksLoading(false))
+      }).catch((err) => {
+        console.error('提取任务失败:', err)
+      }).finally(() => setTasksLoading(false))
     }
   }, [sessionStatus, sessionId])
 

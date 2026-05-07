@@ -230,7 +230,7 @@ export const api = {
 
   // ---- Task ----
   getTasks: async (workspaceId: string) => {
-    if (isWails) return wailsCall<any[]>('GetTasks', workspaceId)
+    if (isWails) return httpCall<any[]>('GET', `/workspaces/${workspaceId}/tasks`)
     return httpCall<any[]>('GET', `/workspaces/${workspaceId}/tasks`)
   },
 

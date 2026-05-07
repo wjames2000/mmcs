@@ -346,7 +346,7 @@ func (s *Service) GetMinutes(ctx context.Context, id string) (*minutes.MeetingMi
 			// 从最后一轮消息中提取结论
 			if len(msgs) > 0 {
 				lastMsg := msgs[len(msgs)-1]
-				conclusion = truncateContent(lastMsg.Content, 500)
+				conclusion = lastMsg.Content
 
 				// 查找包含"共识""结论""决定""一致"等关键词的消息作为决策
 				for _, msg := range msgs {
@@ -355,7 +355,7 @@ func (s *Service) GetMinutes(ctx context.Context, id string) (*minutes.MeetingMi
 						strings.Contains(content, "决定") || strings.Contains(content, "一致同意") {
 						decisions = append(decisions, minutes.Decision{
 							Title:       fmt.Sprintf("第%d轮讨论结论", msg.Round),
-							Description: truncateContent(content, 300),
+							Description: truncateContent(content, 5000),
 							Accepted:    true,
 						})
 						if len(decisions) >= 5 {
